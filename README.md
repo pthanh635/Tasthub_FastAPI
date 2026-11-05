@@ -1,17 +1,1 @@
-﻿# Tasthub_FastAPI
-taskhub-api/
-|-- app/
-|   |-- api/
-|   |   `-- v1/
-|   |       `-- routers/
-|   |           `-- tasks.py
-|   |-- schemas/
-|   |   `-- task.py
-|   |-- services/
-|   |   `-- task_service.py
-|   `-- main.py
-|-- tests/
-|   `-- test_tasks.py
-|-- .gitignore
-|-- requirements.txt
-`-- README.md
+﻿
