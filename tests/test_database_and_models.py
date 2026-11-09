@@ -88,7 +88,7 @@ async def test_unique_constraints(
 ) -> None:
     """Verify unique constraints on users, workspace_members, and labels."""
     duplicate_user = User(
-        email="owner@taskhub.local",
+        email="owner@taskhub.dev",
         hashed_password="hash",
         full_name="Duplicate Email User",
     )

@@ -2,13 +2,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, String
+from sqlalchemy import Boolean, Enum, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from app.models.enums import UserRole
 
 if TYPE_CHECKING:
     from app.models.comment import Comment
+    from app.models.refresh_token import RefreshToken
     from app.models.task import Task
     from app.models.workspace import Workspace, WorkspaceMember
 
@@ -28,6 +30,12 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     full_name: Mapped[str] = mapped_column(
         String(255),
+        nullable=False,
+    )
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole, name="user_role_enum"),
+        default=UserRole.MEMBER,
+        server_default=UserRole.MEMBER.value,
         nullable=False,
     )
     is_active: Mapped[bool] = mapped_column(
@@ -64,4 +72,8 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         back_populates="author",
         lazy="selectin",
     )
-
+    refresh_tokens: Mapped[list[RefreshToken]] = relationship(
+        "RefreshToken",
+        back_populates="user",
+        lazy="selectin",
+    )

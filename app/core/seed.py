@@ -6,12 +6,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
-from app.models.enums import WorkspaceRole
+from app.core.security import hash_password
+from app.models.enums import ProjectStatus, UserRole, WorkspaceRole
 from app.models.project import Project
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 
-DEFAULT_SEED_USER_EMAIL = "owner@taskhub.local"
+DEFAULT_SEED_USER_EMAIL = "owner@taskhub.dev"
+DEFAULT_SEED_USER_PASSWORD = "SeedPassword123!"
 DEFAULT_SEED_WORKSPACE_NAME = "Default Workspace"
 DEFAULT_SEED_PROJECT_NAME = "Default Project"
 
@@ -24,14 +26,15 @@ class SeedContext:
 
 
 async def seed_initial_data(session: AsyncSession) -> SeedContext:
-    """Idempotently seed a default User, Workspace, WorkspaceMember, and Project for Day 2."""
+    """Idempotently seed a default User, Workspace, WorkspaceMember, and Project."""
     user_stmt = select(User).where(User.email == DEFAULT_SEED_USER_EMAIL)
     user = (await session.scalars(user_stmt)).first()
     if user is None:
         user = User(
             email=DEFAULT_SEED_USER_EMAIL,
-            hashed_password="seeded-placeholder-hash-day2",
+            hashed_password=hash_password(DEFAULT_SEED_USER_PASSWORD),
             full_name="TaskHub Seed Owner",
+            role=UserRole.ADMIN,
             is_active=True,
         )
         session.add(user)
@@ -45,7 +48,7 @@ async def seed_initial_data(session: AsyncSession) -> SeedContext:
     if workspace is None:
         workspace = Workspace(
             name=DEFAULT_SEED_WORKSPACE_NAME,
-            description="Seeded workspace for Day 2 Task CRUD",
+            description="Seeded workspace for TaskHub",
             owner_id=user.id,
         )
         session.add(workspace)
@@ -74,7 +77,8 @@ async def seed_initial_data(session: AsyncSession) -> SeedContext:
         project = Project(
             workspace_id=workspace.id,
             name=DEFAULT_SEED_PROJECT_NAME,
-            description="Seeded project for Day 2 Task CRUD",
+            description="Seeded project for TaskHub",
+            status=ProjectStatus.ACTIVE,
         )
         session.add(project)
         await session.flush()
@@ -98,4 +102,3 @@ async def _run_cli_seed() -> None:
 
 if __name__ == "__main__":
     asyncio.run(_run_cli_seed())
-

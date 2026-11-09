@@ -1,11 +1,21 @@
 from enum import StrEnum
 
 
+class UserRole(StrEnum):
+    ADMIN = "ADMIN"
+    MEMBER = "MEMBER"
+
+
 class WorkspaceRole(StrEnum):
     OWNER = "OWNER"
     ADMIN = "ADMIN"
     EDITOR = "EDITOR"
     VIEWER = "VIEWER"
+
+
+class ProjectStatus(StrEnum):
+    ACTIVE = "ACTIVE"
+    ARCHIVED = "ARCHIVED"
 
 
 class TaskStatus(StrEnum):
