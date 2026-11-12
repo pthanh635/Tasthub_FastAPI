@@ -36,6 +36,12 @@ class ErrorMessages:
     CANNOT_DELETE_LAST_ACTIVE_ADMIN = (
         "Cannot delete or deactivate the last active admin user"
     )
+    CANNOT_DELETE_USER_WITH_RESOURCES = (
+        "Cannot delete user who owns workspaces or has dependent resources"
+    )
+    CANNOT_DELETE_WORKSPACE_WITH_RESOURCES = (
+        "Cannot delete workspace with dependent resources"
+    )
 
     # Bad Request / Business Validation (400)
     INCORRECT_CURRENT_PASSWORD = "Current password is incorrect"
@@ -47,4 +53,3 @@ class ErrorMessages:
     CANNOT_ASSIGN_OWNER_ROLE = "Cannot assign OWNER role to a non-owner member"
     PROJECT_ARCHIVED = "Cannot create tasks in an archived project"
     ASSIGNEE_NOT_IN_WORKSPACE = "Assignee must be a member of the project's workspace"
-

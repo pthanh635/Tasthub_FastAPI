@@ -1,12 +1,10 @@
 from collections.abc import Mapping
-from typing import Annotated
 
-from fastapi import Depends
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db_session
+from app.core.database import DbSessionDep
 from app.core.exceptions import ConflictError
 from app.core.messages import ErrorMessages
 from app.models.enums import UserRole
@@ -27,6 +25,15 @@ class UserRepository(BaseRepository[User]):
             await self._session.rollback()
             raise ConflictError(ErrorMessages.EMAIL_ALREADY_REGISTERED) from exc
 
+    async def delete(self, instance: User) -> None:
+        try:
+            await super().delete(instance)
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise ConflictError(
+                ErrorMessages.CANNOT_DELETE_USER_WITH_RESOURCES
+            ) from exc
+
     async def get_by_email(self, email: str) -> User | None:
         normalized = email.strip().lower()
         statement = select(User).where(func.lower(User.email) == normalized)
@@ -44,9 +51,6 @@ class UserRepository(BaseRepository[User]):
         )
         result = await self._session.scalars(statement)
         return len(result.all())
-
-
-DbSessionDep = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 def get_user_repository(session: DbSessionDep) -> UserRepository:

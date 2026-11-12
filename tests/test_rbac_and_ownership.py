@@ -196,3 +196,15 @@ async def test_workspace_project_and_task_rbac_and_ownership(
     )
     assert task_in_archived.status_code == 400
 
+    # Delete workspace (with members & projects) must succeed (204) via CASCADE
+    delete_ws_resp = await async_client.delete(
+        f"/api/v1/workspaces/{ws_id}",
+        headers=owner_headers,
+    )
+    assert delete_ws_resp.status_code == 204
+
+    get_deleted_ws = await async_client.get(
+        f"/api/v1/workspaces/{ws_id}",
+        headers=owner_headers,
+    )
+    assert get_deleted_ws.status_code == 404

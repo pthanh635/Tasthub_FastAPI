@@ -6,10 +6,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.constants import ENTITY_NAME_MAX_LENGTH, ENTITY_NAME_MIN_LENGTH
 from app.models.enums import WorkspaceRole
-from app.schemas.auth import StrippedBaseModel
+from app.schemas.base import BaseSchema
 
 
-class WorkspaceCreate(StrippedBaseModel):
+class WorkspaceCreate(BaseSchema):
     name: str = Field(
         min_length=ENTITY_NAME_MIN_LENGTH,
         max_length=ENTITY_NAME_MAX_LENGTH,
@@ -17,7 +17,7 @@ class WorkspaceCreate(StrippedBaseModel):
     description: str | None = None
 
 
-class WorkspaceUpdate(StrippedBaseModel):
+class WorkspaceUpdate(BaseSchema):
     name: str | None = Field(
         default=None,
         min_length=ENTITY_NAME_MIN_LENGTH,

@@ -19,7 +19,7 @@ class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("workspaces.id", ondelete="RESTRICT"),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
     )
@@ -36,10 +36,10 @@ class Project(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     workspace: Mapped[Workspace] = relationship(
         "Workspace",
         back_populates="projects",
-        lazy="selectin",
     )
     tasks: Mapped[list[Task]] = relationship(
         "Task",
         back_populates="project",
-        lazy="selectin",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )

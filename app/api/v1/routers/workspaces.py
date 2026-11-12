@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query, Response, status
 
 from app.api.v1.dependencies import CurrentUserDep, WorkspaceServiceDep
+from app.core.constants import DEFAULT_PAGE_LIMIT, DEFAULT_PAGE_OFFSET, MAX_PAGE_LIMIT
 from app.schemas.project import ProjectCreate, ProjectResponse
 from app.schemas.workspace import (
     WorkspaceCreate,
@@ -39,8 +40,8 @@ async def create_workspace(
 async def list_workspaces(
     current_user: CurrentUserDep,
     service: WorkspaceServiceDep,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+    offset: Annotated[int, Query(ge=0)] = DEFAULT_PAGE_OFFSET,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_LIMIT)] = DEFAULT_PAGE_LIMIT,
 ) -> list[WorkspaceResponse]:
     return await service.list_workspaces(
         current_user=current_user,
@@ -178,7 +179,7 @@ async def list_projects_in_workspace(
     current_user: CurrentUserDep,
     service: WorkspaceServiceDep,
     offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_LIMIT)] = DEFAULT_PAGE_LIMIT,
 ) -> list[ProjectResponse]:
     return await service.list_projects(
         workspace_id,

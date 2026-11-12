@@ -3,7 +3,7 @@ from enum import StrEnum
 # Password & Security Constants
 PASSWORD_MIN_LENGTH: int = 8
 PASSWORD_MAX_BYTES: int = 72
-MIN_SECRET_KEY_LENGTH: int = 16
+MIN_SECRET_KEY_LENGTH: int = 32
 DEFAULT_JWT_ALGORITHM: str = "HS256"
 DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 DEFAULT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
@@ -27,4 +27,3 @@ MAX_PAGE_LIMIT: int = 100
 class TokenType(StrEnum):
     ACCESS = "access"
     REFRESH = "refresh"
-

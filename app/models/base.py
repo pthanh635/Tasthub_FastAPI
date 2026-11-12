@@ -14,7 +14,7 @@ NAMING_CONVENTION: dict[str, str] = {
 
 
 def utc_now() -> datetime:
-    """Return timezone-aware current UTC datetime."""
+    """Return the timezone-aware UTC time used for application-side state changes."""
     return datetime.now(UTC)
 
 
@@ -35,18 +35,16 @@ class UUIDPrimaryKeyMixin:
 
 
 class TimestampMixin:
-    """Mixin providing timezone-aware created_at and updated_at columns."""
+    """Mixin providing database server generated created_at and updated_at columns."""
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=utc_now,
         server_default=func.now(),
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=utc_now,
-        onupdate=utc_now,
         server_default=func.now(),
+        onupdate=func.now(),
         nullable=False,
     )

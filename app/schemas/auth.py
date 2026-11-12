@@ -7,25 +7,13 @@ from app.core.constants import (
     USER_FULL_NAME_MAX_LENGTH,
     USER_FULL_NAME_MIN_LENGTH,
 )
+from app.schemas.base import BaseSchema, validate_password_byte_length
 
 
-def validate_password_byte_length(value: str) -> str:
-    """Ensure password does not exceed bcrypt's 72 UTF-8 byte limit."""
-    if len(value.encode("utf-8")) > PASSWORD_MAX_BYTES:
-        raise ValueError(
-            f"Password must not exceed {PASSWORD_MAX_BYTES} bytes in UTF-8 encoding"
-        )
-    return value
+class RegisterRequest(BaseModel):
+    """Registration payload. Password whitespaces are preserved; email & full_name are stripped."""
 
-
-class StrippedBaseModel(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
-
-
-class RegisterRequest(StrippedBaseModel):
-    """Registration payload. Role selection by client is strictly forbidden."""
-
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    model_config = ConfigDict(extra="forbid")
 
     email: EmailStr = Field(max_length=EMAIL_MAX_LENGTH)
     password: str = Field(
@@ -37,6 +25,11 @@ class RegisterRequest(StrippedBaseModel):
         max_length=USER_FULL_NAME_MAX_LENGTH,
     )
 
+    @field_validator("email", "full_name")
+    @classmethod
+    def strip_text_fields(cls, value: str) -> str:
+        return value.strip()
+
     @field_validator("password")
     @classmethod
     def check_password_bytes(cls, value: str) -> str:
@@ -44,8 +37,15 @@ class RegisterRequest(StrippedBaseModel):
 
 
 class LoginRequest(BaseModel):
+    """Login payload. Password whitespaces are strictly preserved."""
+
     email: EmailStr = Field(max_length=EMAIL_MAX_LENGTH)
     password: str = Field(min_length=1, max_length=PASSWORD_MAX_BYTES)
+
+    @field_validator("email")
+    @classmethod
+    def strip_email(cls, value: str) -> str:
+        return value.strip()
 
     @field_validator("password")
     @classmethod
@@ -59,9 +59,9 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
-class RefreshTokenRequest(StrippedBaseModel):
+class RefreshTokenRequest(BaseSchema):
     refresh_token: str = Field(min_length=1)
 
 
-class LogoutRequest(StrippedBaseModel):
+class LogoutRequest(BaseSchema):
     refresh_token: str = Field(min_length=1)

@@ -18,7 +18,7 @@ class Comment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     task_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("tasks.id", ondelete="RESTRICT"),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
     )
@@ -33,11 +33,8 @@ class Comment(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     task: Mapped[Task] = relationship(
         "Task",
         back_populates="comments",
-        lazy="selectin",
     )
     author: Mapped[User] = relationship(
         "User",
         back_populates="comments",
-        lazy="selectin",
     )
-

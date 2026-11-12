@@ -24,7 +24,8 @@ taskhub/
 ├── alembic/
 │   ├── versions/
 │   │   ├── 0001_initial_schema.py
-│   │   └── 0002_auth_and_rbac.py
+│   │   ├── 0002_auth_and_rbac.py
+│   │   └── 0003_cascade_and_indexes.py
 │   ├── env.py
 │   ├── README
 │   └── script.py.mako
@@ -159,10 +160,10 @@ taskhub/
 # 1. Kích hoạt môi trường ảo
 .\.venv\Scripts\activate
 
-# 2. Chạy Alembic migration lên head (0002_auth_and_rbac)
+# 2. Chạy toàn bộ Alembic migration lên head
 alembic upgrade head
 
-# 3. Seed dữ liệu mẫu (owner@taskhub.local / SeedPassword123!)
+# 3. Seed dữ liệu mẫu (giá trị lấy từ SEED_ADMIN_EMAIL và SEED_ADMIN_PASSWORD)
 python -m app.core.seed
 
 # 4. Khởi động API server

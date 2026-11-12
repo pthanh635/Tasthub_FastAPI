@@ -44,6 +44,7 @@ class AuthService:
                 "is_active": True,
             }
         )
+        await self._user_repo.commit()
         return UserResponse.model_validate(user)
 
     async def login(self, email: str, password: str) -> TokenResponse:
@@ -54,7 +55,9 @@ class AuthService:
         if not user.is_active:
             raise PermissionDeniedError(ErrorMessages.INACTIVE_USER)
 
-        return await self._issue_token_pair(user)
+        tokens = await self._issue_token_pair(user)
+        await self._refresh_token_repo.commit()
+        return tokens
 
     async def refresh(self, raw_refresh_token: str) -> TokenResponse:
         payload = decode_token(
@@ -76,8 +79,8 @@ class AuthService:
                 # Reuse of revoked refresh token detected: revoke all sessions of user
                 await self._refresh_token_repo.revoke_all_for_user(
                     existing_record.user_id,
-                    commit=True,
                 )
+                await self._refresh_token_repo.commit()
             raise AuthenticationError(
                 ErrorMessages.REFRESH_TOKEN_REVOKED_OR_EXPIRED
             )
@@ -88,7 +91,9 @@ class AuthService:
         if not user.is_active:
             raise PermissionDeniedError(ErrorMessages.INACTIVE_USER)
 
-        return await self._issue_token_pair(user)
+        tokens = await self._issue_token_pair(user)
+        await self._refresh_token_repo.commit()
+        return tokens
 
     async def logout(
         self,
@@ -118,6 +123,7 @@ class AuthService:
                 payload.jti,
                 expected_token_hash=token_digest,
             )
+            await self._refresh_token_repo.commit()
 
     async def _issue_token_pair(self, user: User) -> TokenResponse:
         access_token = create_access_token(

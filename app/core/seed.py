@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal
 from app.core.security import hash_password
 from app.models.enums import ProjectStatus, UserRole, WorkspaceRole
@@ -12,8 +13,6 @@ from app.models.project import Project
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 
-DEFAULT_SEED_USER_EMAIL = "owner@taskhub.dev"
-DEFAULT_SEED_USER_PASSWORD = "SeedPassword123!"
 DEFAULT_SEED_WORKSPACE_NAME = "Default Workspace"
 DEFAULT_SEED_PROJECT_NAME = "Default Project"
 
@@ -27,12 +26,21 @@ class SeedContext:
 
 async def seed_initial_data(session: AsyncSession) -> SeedContext:
     """Idempotently seed a default User, Workspace, WorkspaceMember, and Project."""
-    user_stmt = select(User).where(User.email == DEFAULT_SEED_USER_EMAIL)
+    user_email = settings.seed_admin_email.strip().lower()
+    user_password = settings.seed_admin_password
+
+    user_stmt = select(User).where(User.email == user_email)
     user = (await session.scalars(user_stmt)).first()
+
     if user is None:
+        if not user_password:
+            raise RuntimeError(
+                "SEED_ADMIN_PASSWORD must be configured before creating an admin"
+            )
+
         user = User(
-            email=DEFAULT_SEED_USER_EMAIL,
-            hashed_password=hash_password(DEFAULT_SEED_USER_PASSWORD),
+            email=user_email,
+            hashed_password=hash_password(user_password),
             full_name="TaskHub Seed Owner",
             role=UserRole.ADMIN,
             is_active=True,

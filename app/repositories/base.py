@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import DEFAULT_PAGE_LIMIT
 from app.models.base import Base
 
 ModelType = TypeVar("ModelType", bound=Base)
@@ -17,10 +18,25 @@ class BaseRepository(Generic[ModelType]):
         self._model = model
         self._session = session
 
+    @property
+    def session(self) -> AsyncSession:
+        return self._session
+
+    async def commit(self) -> None:
+        await self._session.commit()
+
+    async def rollback(self) -> None:
+        await self._session.rollback()
+
     async def get_by_id(self, entity_id: UUID) -> ModelType | None:
         return await self._session.get(self._model, entity_id)
 
-    async def get_all(self, *, offset: int = 0, limit: int = 100) -> list[ModelType]:
+    async def get_all(
+        self,
+        *,
+        offset: int = 0,
+        limit: int = DEFAULT_PAGE_LIMIT,
+    ) -> list[ModelType]:
         statement = select(self._model).offset(offset).limit(limit)
         result = await self._session.scalars(statement)
         return list(result.all())
@@ -46,4 +62,3 @@ class BaseRepository(Generic[ModelType]):
     async def delete(self, instance: ModelType) -> None:
         await self._session.delete(instance)
         await self._session.flush()
-

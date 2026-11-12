@@ -1,12 +1,11 @@
-from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db_session
+from app.core.constants import DEFAULT_PAGE_LIMIT
+from app.core.database import DbSessionDep
 from app.core.exceptions import ConflictError
 from app.core.messages import ErrorMessages
 from app.models.enums import WorkspaceRole
@@ -26,12 +25,12 @@ class WorkspaceRepository(BaseRepository[Workspace]):
         *,
         is_global_admin: bool = False,
         offset: int = 0,
-        limit: int = 100,
+        limit: int = DEFAULT_PAGE_LIMIT,
     ) -> list[Workspace]:
         if is_global_admin:
             statement = (
                 select(Workspace)
-                .order_by(Workspace.created_at.desc())
+                .order_by(Workspace.created_at.desc(), Workspace.id.desc())
                 .offset(offset)
                 .limit(limit)
             )
@@ -43,12 +42,21 @@ class WorkspaceRepository(BaseRepository[Workspace]):
                     WorkspaceMember.workspace_id == Workspace.id,
                 )
                 .where(WorkspaceMember.user_id == user_id)
-                .order_by(Workspace.created_at.desc())
+                .order_by(Workspace.created_at.desc(), Workspace.id.desc())
                 .offset(offset)
                 .limit(limit)
             )
         result = await self._session.scalars(statement)
         return list(result.all())
+
+    async def delete(self, instance: Workspace) -> None:
+        try:
+            await super().delete(instance)
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise ConflictError(
+                ErrorMessages.CANNOT_DELETE_WORKSPACE_WITH_RESOURCES
+            ) from exc
 
     async def get_member(
         self,
@@ -66,7 +74,7 @@ class WorkspaceRepository(BaseRepository[Workspace]):
         statement = (
             select(WorkspaceMember)
             .where(WorkspaceMember.workspace_id == workspace_id)
-            .order_by(WorkspaceMember.joined_at.asc())
+            .order_by(WorkspaceMember.joined_at.asc(), WorkspaceMember.id.asc())
         )
         result = await self._session.scalars(statement)
         return list(result.all())
@@ -87,7 +95,9 @@ class WorkspaceRepository(BaseRepository[Workspace]):
             await self._session.flush()
         except IntegrityError as exc:
             await self._session.rollback()
-            raise ConflictError(ErrorMessages.WORKSPACE_MEMBER_ALREADY_EXISTS) from exc
+            raise ConflictError(
+                ErrorMessages.WORKSPACE_MEMBER_ALREADY_EXISTS
+            ) from exc
         await self._session.refresh(member)
         return member
 
@@ -104,9 +114,6 @@ class WorkspaceRepository(BaseRepository[Workspace]):
     async def remove_member(self, member: WorkspaceMember) -> None:
         await self._session.delete(member)
         await self._session.flush()
-
-
-DbSessionDep = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 def get_workspace_repository(session: DbSessionDep) -> WorkspaceRepository:

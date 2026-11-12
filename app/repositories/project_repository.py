@@ -1,11 +1,10 @@
-from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db_session
+from app.core.constants import DEFAULT_PAGE_LIMIT
+from app.core.database import DbSessionDep
 from app.models.project import Project
 from app.repositories.base import BaseRepository
 
@@ -21,12 +20,12 @@ class ProjectRepository(BaseRepository[Project]):
         workspace_id: UUID,
         *,
         offset: int = 0,
-        limit: int = 100,
+        limit: int = DEFAULT_PAGE_LIMIT,
     ) -> list[Project]:
         statement = (
             select(Project)
             .where(Project.workspace_id == workspace_id)
-            .order_by(Project.created_at.desc())
+            .order_by(Project.created_at.desc(), Project.id.desc())
             .offset(offset)
             .limit(limit)
         )
@@ -34,9 +33,5 @@ class ProjectRepository(BaseRepository[Project]):
         return list(result.all())
 
 
-DbSessionDep = Annotated[AsyncSession, Depends(get_db_session)]
-
-
 def get_project_repository(session: DbSessionDep) -> ProjectRepository:
     return ProjectRepository(session)
-

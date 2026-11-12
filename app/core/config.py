@@ -33,7 +33,6 @@ class Settings(BaseSettings):
         validation_alias="TEST_DATABASE_URL",
     )
     jwt_secret_key: str = Field(
-        default="taskhub-dev-secret-key-must-be-at-least-32-bytes-long",
         validation_alias="JWT_SECRET_KEY",
         min_length=MIN_SECRET_KEY_LENGTH,
     )
@@ -51,6 +50,15 @@ class Settings(BaseSettings):
         default=DEFAULT_REFRESH_TOKEN_EXPIRE_DAYS,
         validation_alias="REFRESH_TOKEN_EXPIRE_DAYS",
         gt=0,
+    )
+    seed_admin_email: str = Field(
+        default="owner@taskhub.dev",
+        validation_alias="SEED_ADMIN_EMAIL",
+    )
+    seed_admin_password: str | None = Field(
+        default=None,
+        validation_alias="SEED_ADMIN_PASSWORD",
+        min_length=12,
     )
 
 

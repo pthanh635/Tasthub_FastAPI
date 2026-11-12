@@ -4,10 +4,19 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import (
+    DateTime,
+    Enum,
+    ForeignKey,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin, utc_now
+from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.enums import WorkspaceRole
 
 if TYPE_CHECKING:
@@ -31,22 +40,24 @@ class Workspace(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     owner: Mapped[User] = relationship(
         "User",
         back_populates="owned_workspaces",
-        lazy="selectin",
     )
     members: Mapped[list[WorkspaceMember]] = relationship(
         "WorkspaceMember",
         back_populates="workspace",
-        lazy="selectin",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     projects: Mapped[list[Project]] = relationship(
         "Project",
         back_populates="workspace",
-        lazy="selectin",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     labels: Mapped[list[Label]] = relationship(
         "Label",
         back_populates="workspace",
-        lazy="selectin",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
@@ -62,13 +73,13 @@ class WorkspaceMember(UUIDPrimaryKeyMixin, Base):
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("workspaces.id", ondelete="RESTRICT"),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("users.id", ondelete="RESTRICT"),
+        ForeignKey("users.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
     )
@@ -79,7 +90,6 @@ class WorkspaceMember(UUIDPrimaryKeyMixin, Base):
     )
     joined_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=utc_now,
         server_default=func.now(),
         nullable=False,
     )
@@ -87,11 +97,8 @@ class WorkspaceMember(UUIDPrimaryKeyMixin, Base):
     workspace: Mapped[Workspace] = relationship(
         "Workspace",
         back_populates="members",
-        lazy="selectin",
     )
     user: Mapped[User] = relationship(
         "User",
         back_populates="workspace_memberships",
-        lazy="selectin",
     )
-

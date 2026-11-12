@@ -18,7 +18,7 @@ from app.core.constants import (
     USER_FULL_NAME_MIN_LENGTH,
 )
 from app.models.enums import UserRole
-from app.schemas.auth import StrippedBaseModel, validate_password_byte_length
+from app.schemas.base import BaseSchema, validate_password_byte_length
 
 
 class UserResponse(BaseModel):
@@ -35,7 +35,7 @@ class UserResponse(BaseModel):
     updated_at: datetime
 
 
-class UserUpdate(StrippedBaseModel):
+class UserUpdate(BaseSchema):
     """Schema for updating the current user's profile via PATCH /users/me."""
 
     full_name: str | None = Field(
@@ -51,7 +51,7 @@ class UserUpdate(StrippedBaseModel):
         return self
 
 
-class AdminUserUpdate(StrippedBaseModel):
+class AdminUserUpdate(BaseSchema):
     """Schema for global ADMIN updating a user's profile, role, or active status."""
 
     full_name: str | None = Field(
@@ -74,7 +74,7 @@ class AdminUserUpdate(StrippedBaseModel):
 
 
 class ChangePasswordRequest(BaseModel):
-    """Schema for changing the current user's password."""
+    """Schema for changing the current user's password. Whitespaces are strictly preserved."""
 
     current_password: str = Field(min_length=1, max_length=PASSWORD_MAX_BYTES)
     new_password: str = Field(

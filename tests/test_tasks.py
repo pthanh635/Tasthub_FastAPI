@@ -46,7 +46,6 @@ async def test_task_crud(
         "project_id": str(seed_context.project_id),
         "title": "Learn FastAPI & SQLAlchemy 2.x",
         "description": "Migrate Task CRUD to PostgreSQL",
-        "status": "TODO",
         "priority": "HIGH",
         "assignee_id": str(seed_context.user_id),
         "due_date": "2026-11-15T10:00:00Z",
@@ -72,8 +71,10 @@ async def test_task_crud(
         headers=auth_headers,
     )
     assert listed.status_code == 200
-    assert len(listed.json()) == 1
-    assert listed.json()[0]["id"] == task_id
+    list_body = listed.json()
+    assert list_body["total"] == 1
+    assert len(list_body["items"]) == 1
+    assert list_body["items"][0]["id"] == task_id
 
     fetched = await async_client.get(
         f"/api/v1/tasks/{task_id}",
@@ -136,7 +137,11 @@ async def test_task_not_found_endpoints(
 
     put_resp = await async_client.put(
         f"/api/v1/tasks/{missing_id}",
-        json={"title": "Non-existent task"},
+        json={
+            "title": "Non-existent task",
+            "status": "TODO",
+            "priority": "LOW",
+        },
         headers=auth_headers,
     )
     assert put_resp.status_code == 404
@@ -178,23 +183,19 @@ async def test_input_validation_errors(
     )
     assert empty_title.status_code == 422
 
+    whitespace_title = await async_client.post(
+        "/api/v1/tasks",
+        json={"project_id": str(seed_context.project_id), "title": "   "},
+        headers=auth_headers,
+    )
+    assert whitespace_title.status_code == 422
+
     missing_project = await async_client.post(
         "/api/v1/tasks",
         json={"title": "Missing project_id"},
         headers=auth_headers,
     )
     assert missing_project.status_code == 422
-
-    invalid_status = await async_client.post(
-        "/api/v1/tasks",
-        json={
-            "project_id": str(seed_context.project_id),
-            "title": "Invalid enum",
-            "status": "INVALID_STATUS",
-        },
-        headers=auth_headers,
-    )
-    assert invalid_status.status_code == 422
 
     invalid_uuid = await async_client.get(
         "/api/v1/tasks/not-a-uuid",

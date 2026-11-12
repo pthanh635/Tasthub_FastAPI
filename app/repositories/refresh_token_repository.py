@@ -1,11 +1,9 @@
-from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db_session
+from app.core.database import DbSessionDep
 from app.models.base import utc_now
 from app.models.refresh_token import RefreshToken
 from app.repositories.base import BaseRepository
@@ -56,8 +54,6 @@ class RefreshTokenRepository(BaseRepository[RefreshToken]):
     async def revoke_all_for_user(
         self,
         user_id: UUID,
-        *,
-        commit: bool = False,
     ) -> None:
         statement = (
             update(RefreshToken)
@@ -69,11 +65,6 @@ class RefreshTokenRepository(BaseRepository[RefreshToken]):
         )
         await self._session.execute(statement)
         await self._session.flush()
-        if commit:
-            await self._session.commit()
-
-
-DbSessionDep = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 def get_refresh_token_repository(session: DbSessionDep) -> RefreshTokenRepository:

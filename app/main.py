@@ -1,8 +1,9 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 
 from app.api.v1.routers import auth, projects, tasks, users, workspaces
 from app.core.config import settings
@@ -19,7 +20,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title=settings.app_name,
     description=(
-        "Day 3: TaskHub API with JWT Authentication, Bcrypt Password Hashing, "
+        "TaskHub API with JWT Authentication, Bcrypt Password Hashing, "
         "Role-Based Access Control (RBAC), and Resource Ownership"
     ),
     version="0.3.0",
@@ -36,6 +37,17 @@ async def app_exception_handler(
         status_code=exc.status_code,
         content={"detail": exc.message},
         headers=exc.headers,
+    )
+
+
+@app.exception_handler(IntegrityError)
+async def integrity_error_handler(
+    _request: Request,
+    _exc: IntegrityError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_409_CONFLICT,
+        content={"detail": "Database integrity conflict occurred"},
     )
 
 

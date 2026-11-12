@@ -1,15 +1,22 @@
 from collections.abc import Collection
 from uuid import UUID
 
+from app.core.constants import DEFAULT_PAGE_LIMIT
 from app.core.exceptions import (
     BadRequestError,
     ConflictError,
-    PermissionDeniedError,
     ProjectNotFoundError,
     UserNotFoundError,
     WorkspaceNotFoundError,
 )
 from app.core.messages import ErrorMessages
+from app.core.policies import (
+    ALL_WORKSPACE_ROLES,
+    MANAGER_WORKSPACE_ROLES,
+    WRITER_WORKSPACE_ROLES,
+    ensure_workspace_owner_or_admin,
+    ensure_workspace_role,
+)
 from app.models.enums import ProjectStatus, UserRole, WorkspaceRole
 from app.models.project import Project
 from app.models.user import User
@@ -24,28 +31,6 @@ from app.schemas.workspace import (
     WorkspaceMemberResponse,
     WorkspaceResponse,
     WorkspaceUpdate,
-)
-
-ALL_WORKSPACE_ROLES: frozenset[WorkspaceRole] = frozenset(
-    {
-        WorkspaceRole.OWNER,
-        WorkspaceRole.ADMIN,
-        WorkspaceRole.EDITOR,
-        WorkspaceRole.VIEWER,
-    }
-)
-MANAGER_WORKSPACE_ROLES: frozenset[WorkspaceRole] = frozenset(
-    {
-        WorkspaceRole.OWNER,
-        WorkspaceRole.ADMIN,
-    }
-)
-WRITER_WORKSPACE_ROLES: frozenset[WorkspaceRole] = frozenset(
-    {
-        WorkspaceRole.OWNER,
-        WorkspaceRole.ADMIN,
-        WorkspaceRole.EDITOR,
-    }
 )
 
 
@@ -80,6 +65,7 @@ class WorkspaceService:
             user_id=current_user.id,
             role=WorkspaceRole.OWNER,
         )
+        await self._workspace_repo.commit()
         return WorkspaceResponse.model_validate(workspace)
 
     async def list_workspaces(
@@ -87,7 +73,7 @@ class WorkspaceService:
         *,
         current_user: User,
         offset: int = 0,
-        limit: int = 100,
+        limit: int = DEFAULT_PAGE_LIMIT,
     ) -> list[WorkspaceResponse]:
         workspaces = await self._workspace_repo.list_for_user(
             current_user.id,
@@ -118,11 +104,12 @@ class WorkspaceService:
         current_user: User,
     ) -> WorkspaceResponse:
         workspace = await self._get_workspace_or_raise(workspace_id)
-        self._require_workspace_owner_or_global_admin(workspace, current_user)
+        ensure_workspace_owner_or_admin(current_user, workspace.owner_id)
 
         changes = data.model_dump(exclude_unset=True)
         if changes:
             workspace = await self._workspace_repo.update(workspace, changes)
+            await self._workspace_repo.commit()
         return WorkspaceResponse.model_validate(workspace)
 
     async def delete_workspace(
@@ -132,8 +119,9 @@ class WorkspaceService:
         current_user: User,
     ) -> None:
         workspace = await self._get_workspace_or_raise(workspace_id)
-        self._require_workspace_owner_or_global_admin(workspace, current_user)
+        ensure_workspace_owner_or_admin(current_user, workspace.owner_id)
         await self._workspace_repo.delete(workspace)
+        await self._workspace_repo.commit()
 
     async def add_or_update_member(
         self,
@@ -165,6 +153,7 @@ class WorkspaceService:
                 existing,
                 data.role,
             )
+            await self._workspace_repo.commit()
             return WorkspaceMemberResponse.model_validate(updated)
 
         member = await self._workspace_repo.add_member(
@@ -172,6 +161,7 @@ class WorkspaceService:
             user_id=data.user_id,
             role=data.role,
         )
+        await self._workspace_repo.commit()
         return WorkspaceMemberResponse.model_validate(member)
 
     async def list_members(
@@ -208,6 +198,7 @@ class WorkspaceService:
             raise UserNotFoundError(target_user_id)
 
         await self._workspace_repo.remove_member(member)
+        await self._workspace_repo.commit()
 
     async def create_project(
         self,
@@ -229,6 +220,7 @@ class WorkspaceService:
                 "status": ProjectStatus.ACTIVE,
             }
         )
+        await self._project_repo.commit()
         return ProjectResponse.model_validate(project)
 
     async def list_projects(
@@ -237,7 +229,7 @@ class WorkspaceService:
         *,
         current_user: User,
         offset: int = 0,
-        limit: int = 100,
+        limit: int = DEFAULT_PAGE_LIMIT,
     ) -> list[ProjectResponse]:
         await self._get_workspace_and_authorize(
             workspace_id,
@@ -281,6 +273,7 @@ class WorkspaceService:
         changes = data.model_dump(exclude_unset=True)
         if changes:
             project = await self._project_repo.update(project, changes)
+            await self._project_repo.commit()
         return ProjectResponse.model_validate(project)
 
     async def _get_workspace_or_raise(self, workspace_id: UUID) -> Workspace:
@@ -307,17 +300,5 @@ class WorkspaceService:
             return workspace
 
         member = await self._workspace_repo.get_member(workspace_id, current_user.id)
-        if member is None or member.role not in allowed_roles:
-            raise PermissionDeniedError(ErrorMessages.WORKSPACE_PERMISSION_DENIED)
+        ensure_workspace_role(current_user, member.role if member else None, allowed_roles)
         return workspace
-
-    @staticmethod
-    def _require_workspace_owner_or_global_admin(
-        workspace: Workspace,
-        current_user: User,
-    ) -> None:
-        if (
-            current_user.role != UserRole.ADMIN
-            and workspace.owner_id != current_user.id
-        ):
-            raise PermissionDeniedError(ErrorMessages.WORKSPACE_OWNER_REQUIRED)

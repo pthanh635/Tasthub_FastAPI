@@ -18,24 +18,23 @@ class TaskLabel(Base):
 
     task_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("tasks.id", ondelete="RESTRICT"),
+        ForeignKey("tasks.id", ondelete="CASCADE"),
         primary_key=True,
     )
     label_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("labels.id", ondelete="RESTRICT"),
+        ForeignKey("labels.id", ondelete="CASCADE"),
         primary_key=True,
+        index=True,
     )
 
     task: Mapped[Task] = relationship(
         "Task",
         back_populates="task_labels",
-        lazy="selectin",
     )
     label: Mapped[Label] = relationship(
         "Label",
         back_populates="task_labels",
-        lazy="selectin",
     )
 
 
@@ -51,7 +50,7 @@ class Label(UUIDPrimaryKeyMixin, Base):
 
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("workspaces.id", ondelete="RESTRICT"),
+        ForeignKey("workspaces.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
     )
@@ -61,18 +60,16 @@ class Label(UUIDPrimaryKeyMixin, Base):
     workspace: Mapped[Workspace] = relationship(
         "Workspace",
         back_populates="labels",
-        lazy="selectin",
     )
     task_labels: Mapped[list[TaskLabel]] = relationship(
         "TaskLabel",
         back_populates="label",
-        lazy="selectin",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     tasks: Mapped[list[Task]] = relationship(
         "Task",
         secondary="task_labels",
         back_populates="labels",
         viewonly=True,
-        lazy="selectin",
     )
-

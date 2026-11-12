@@ -1,5 +1,6 @@
 from uuid import UUID
 
+from app.core.constants import DEFAULT_PAGE_LIMIT
 from app.core.exceptions import (
     BadRequestError,
     ConflictError,
@@ -41,6 +42,7 @@ class UserService:
         changes = data.model_dump(exclude_unset=True)
         if changes:
             current_user = await self._user_repo.update(current_user, changes)
+            await self._user_repo.commit()
         return UserResponse.model_validate(current_user)
 
     async def change_password(
@@ -59,12 +61,13 @@ class UserService:
             {"hashed_password": hash_password(data.new_password)},
         )
         await self._refresh_token_repo.revoke_all_for_user(current_user.id)
+        await self._user_repo.commit()
 
     async def list_users(
         self,
         *,
         offset: int = 0,
-        limit: int = 100,
+        limit: int = DEFAULT_PAGE_LIMIT,
     ) -> list[UserResponse]:
         users = await self._user_repo.get_all(offset=offset, limit=limit)
         return [UserResponse.model_validate(u) for u in users]
@@ -109,6 +112,7 @@ class UserService:
         updated = await self._user_repo.update(target, changes)
         if changes.get("is_active") is False:
             await self._refresh_token_repo.revoke_all_for_user(updated.id)
+        await self._user_repo.commit()
         return UserResponse.model_validate(updated)
 
     async def admin_delete_user(
@@ -130,3 +134,4 @@ class UserService:
                 raise ConflictError(ErrorMessages.CANNOT_DELETE_LAST_ACTIVE_ADMIN)
 
         await self._user_repo.delete(target)
+        await self._user_repo.commit()

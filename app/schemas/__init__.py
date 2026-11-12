@@ -12,11 +12,12 @@ from app.schemas.auth import (
     RegisterRequest,
     TokenResponse,
 )
+from app.schemas.base import BaseSchema
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.schemas.task import (
     ProjectTaskCreate,
-    TaskBase,
     TaskCreate,
+    TaskListResponse,
     TaskPatch,
     TaskRead,
     TaskResponse,
@@ -38,6 +39,7 @@ from app.schemas.workspace import (
 
 __all__ = [
     "AdminUserUpdate",
+    "BaseSchema",
     "ChangePasswordRequest",
     "LoginRequest",
     "LogoutRequest",
@@ -48,8 +50,8 @@ __all__ = [
     "ProjectUpdate",
     "RefreshTokenRequest",
     "RegisterRequest",
-    "TaskBase",
     "TaskCreate",
+    "TaskListResponse",
     "TaskPatch",
     "TaskPriority",
     "TaskRead",

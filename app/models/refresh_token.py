@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from sqlalchemy import DateTime, ForeignKey, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base, UUIDPrimaryKeyMixin, utc_now
+from app.models.base import Base, UUIDPrimaryKeyMixin
 
 if TYPE_CHECKING:
     from app.models.user import User
@@ -43,7 +43,6 @@ class RefreshToken(UUIDPrimaryKeyMixin, Base):
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
-        default=utc_now,
         server_default=func.now(),
         nullable=False,
     )
@@ -51,6 +50,4 @@ class RefreshToken(UUIDPrimaryKeyMixin, Base):
     user: Mapped[User] = relationship(
         "User",
         back_populates="refresh_tokens",
-        lazy="selectin",
     )
-

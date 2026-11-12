@@ -48,32 +48,34 @@ class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     owned_workspaces: Mapped[list[Workspace]] = relationship(
         "Workspace",
         back_populates="owner",
-        lazy="selectin",
+        passive_deletes=True,
     )
     workspace_memberships: Mapped[list[WorkspaceMember]] = relationship(
         "WorkspaceMember",
         back_populates="user",
-        lazy="selectin",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     assigned_tasks: Mapped[list[Task]] = relationship(
         "Task",
         back_populates="assignee",
         foreign_keys="Task.assignee_id",
-        lazy="selectin",
+        passive_deletes=True,
     )
     created_tasks: Mapped[list[Task]] = relationship(
         "Task",
         back_populates="created_by",
         foreign_keys="Task.created_by_id",
-        lazy="selectin",
+        passive_deletes=True,
     )
     comments: Mapped[list[Comment]] = relationship(
         "Comment",
         back_populates="author",
-        lazy="selectin",
+        passive_deletes=True,
     )
     refresh_tokens: Mapped[list[RefreshToken]] = relationship(
         "RefreshToken",
         back_populates="user",
-        lazy="selectin",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
