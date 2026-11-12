@@ -9,6 +9,9 @@ async def test_health(async_client: AsyncClient) -> None:
     response = await async_client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+    assert response.headers["X-Request-ID"]
+    assert "X-Process-Time-Ms" in response.headers
+    assert response.headers["X-Cache"] == "BYPASS"
 
 
 async def test_swagger_ui_and_openapi_schema(async_client: AsyncClient) -> None:
