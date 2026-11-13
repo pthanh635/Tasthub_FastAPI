@@ -28,6 +28,16 @@ class Settings(BaseSettings):
         validation_alias="DATABASE_URL",
         min_length=1,
     )
+    redis_url: str = Field(
+        default="redis://localhost:6379/0",
+        validation_alias="REDIS_URL",
+        min_length=1,
+    )
+    cache_ttl_seconds: int = Field(
+        default=30,
+        validation_alias="CACHE_TTL_SECONDS",
+        ge=0,
+    )
     test_database_url: str | None = Field(
         default=None,
         validation_alias="TEST_DATABASE_URL",
