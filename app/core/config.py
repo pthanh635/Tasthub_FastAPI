@@ -3,6 +3,13 @@ from functools import lru_cache
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.constants import (
+    DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES,
+    DEFAULT_JWT_ALGORITHM,
+    DEFAULT_REFRESH_TOKEN_EXPIRE_DAYS,
+    MIN_SECRET_KEY_LENGTH,
+)
+
 
 class Settings(BaseSettings):
     """Application configuration loaded from environment variables and .env file."""
@@ -19,10 +26,39 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default="postgresql+asyncpg://localhost:5432/taskhub",
         validation_alias="DATABASE_URL",
+        min_length=1,
     )
     test_database_url: str | None = Field(
         default=None,
         validation_alias="TEST_DATABASE_URL",
+    )
+    jwt_secret_key: str = Field(
+        validation_alias="JWT_SECRET_KEY",
+        min_length=MIN_SECRET_KEY_LENGTH,
+    )
+    jwt_algorithm: str = Field(
+        default=DEFAULT_JWT_ALGORITHM,
+        validation_alias="JWT_ALGORITHM",
+        min_length=1,
+    )
+    access_token_expire_minutes: int = Field(
+        default=DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES,
+        validation_alias="ACCESS_TOKEN_EXPIRE_MINUTES",
+        gt=0,
+    )
+    refresh_token_expire_days: int = Field(
+        default=DEFAULT_REFRESH_TOKEN_EXPIRE_DAYS,
+        validation_alias="REFRESH_TOKEN_EXPIRE_DAYS",
+        gt=0,
+    )
+    seed_admin_email: str = Field(
+        default="owner@taskhub.dev",
+        validation_alias="SEED_ADMIN_EMAIL",
+    )
+    seed_admin_password: str | None = Field(
+        default=None,
+        validation_alias="SEED_ADMIN_PASSWORD",
+        min_length=12,
     )
 
 
@@ -32,4 +68,3 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
-

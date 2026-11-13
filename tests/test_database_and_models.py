@@ -32,7 +32,7 @@ async def test_get_db_session_commits_and_rolls_back(
     db_engine: AsyncEngine,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Verify get_db_session commits on normal exit and rolls back when an error occurs."""
+    """Verify services own commits and the session rolls back on request errors."""
     factory = async_sessionmaker(
         bind=db_engine,
         class_=AsyncSession,
@@ -58,7 +58,7 @@ async def test_get_db_session_commits_and_rolls_back(
                 select(User).where(User.email == "session-commit@taskhub.local")
             )
         ).first()
-        assert saved is not None
+        assert saved is None
 
     gen_rollback = get_db_session()
     session_rb = await anext(gen_rollback)
@@ -88,7 +88,7 @@ async def test_unique_constraints(
 ) -> None:
     """Verify unique constraints on users, workspace_members, and labels."""
     duplicate_user = User(
-        email="owner@taskhub.local",
+        email="owner@taskhub.dev",
         hashed_password="hash",
         full_name="Duplicate Email User",
     )
@@ -130,7 +130,7 @@ async def test_foreign_key_constraints_and_relationships(
     db_session: AsyncSession,
     seed_context: SeedContext,
 ) -> None:
-    """Verify foreign keys, task_labels composite PK, comments, and RESTRICT."""
+    """Verify foreign keys, relationships, and dependent-row cascades."""
     invalid_task = Task(
         project_id=uuid.uuid4(),
         title="Orphan task",
@@ -166,7 +166,7 @@ async def test_foreign_key_constraints_and_relationships(
     db_session.add_all([task_label, comment])
     await db_session.commit()
 
-    await db_session.refresh(task)
+    await db_session.refresh(task, attribute_names=["comments", "labels"])
     assert len(task.comments) == 1
     assert task.comments[0].content == "Schema looks solid!"
     assert len(task.labels) == 1
@@ -175,9 +175,13 @@ async def test_foreign_key_constraints_and_relationships(
     project = await db_session.get(Project, seed_context.project_id)
     assert project is not None
     await db_session.delete(project)
-    with pytest.raises(IntegrityError):
-        await db_session.flush()
-    await db_session.rollback()
+    await db_session.flush()
+    await db_session.commit()
+    remaining_task = await db_session.scalars(
+        select(Task).where(Task.id == task.id)
+    )
+    assert remaining_task.first() is None
+    assert await db_session.get(Label, label.id) is not None
 
 
 async def test_seed_initial_data_is_idempotent(db_session: AsyncSession) -> None:

@@ -68,6 +68,8 @@ async def test_task_service_crud_and_domain_errors(
     """Verify TaskService business logic, foreign key validation, and domain exceptions."""
     repo = TaskRepository(db_session)
     service = TaskService(repo)
+    current_user = await db_session.get(User, seed_context.user_id)
+    assert current_user is not None
 
     due = datetime(2026, 12, 31, 12, 0, tzinfo=UTC)
     created = await service.create(
@@ -75,22 +77,27 @@ async def test_task_service_crud_and_domain_errors(
             project_id=seed_context.project_id,
             title="Implement TaskService",
             description="Async service layer",
-            status=TaskStatus.TODO,
             priority=TaskPriority.HIGH,
             assignee_id=seed_context.user_id,
             due_date=due,
-        )
+        ),
+        current_user=current_user,
     )
     assert created.project_id == seed_context.project_id
     assert created.created_by_id == seed_context.user_id
     assert created.assignee_id == seed_context.user_id
     assert created.priority == TaskPriority.HIGH
 
-    fetched = await service.get(created.id)
+    fetched = await service.get(created.id, current_user=current_user)
     assert fetched.id == created.id
 
-    tasks = await service.list_all(offset=0, limit=10)
-    assert len(tasks) == 1
+    tasks = await service.list_all(
+        current_user=current_user,
+        offset=0,
+        limit=10,
+    )
+    assert len(tasks.items) == 1
+    assert tasks.total == 1
 
     updated = await service.replace(
         created.id,
@@ -102,26 +109,32 @@ async def test_task_service_crud_and_domain_errors(
             assignee_id=None,
             due_date=None,
         ),
+        current_user=current_user,
     )
     assert updated.title == "Completed TaskService"
     assert updated.status == TaskStatus.DONE
     assert updated.priority == TaskPriority.URGENT
     assert updated.assignee_id is None
 
-    await service.delete(created.id)
+    await service.delete(created.id, current_user=current_user)
 
     with pytest.raises(TaskNotFoundError):
-        await service.get(created.id)
+        await service.get(created.id, current_user=current_user)
 
     with pytest.raises(TaskNotFoundError):
-        await service.replace(created.id, TaskUpdate(title="Missing"))
+        await service.replace(
+            created.id,
+            TaskUpdate(title="Missing"),
+            current_user=current_user,
+        )
 
     with pytest.raises(TaskNotFoundError):
-        await service.delete(created.id)
+        await service.delete(created.id, current_user=current_user)
 
     with pytest.raises(ProjectNotFoundError):
         await service.create(
-            TaskCreate(project_id=uuid.uuid4(), title="Invalid Project")
+            TaskCreate(project_id=uuid.uuid4(), title="Invalid Project"),
+            current_user=current_user,
         )
 
     with pytest.raises(UserNotFoundError):
@@ -130,14 +143,6 @@ async def test_task_service_crud_and_domain_errors(
                 project_id=seed_context.project_id,
                 title="Invalid Assignee",
                 assignee_id=uuid.uuid4(),
-            )
-        )
-
-    with pytest.raises(UserNotFoundError):
-        await service.create(
-            TaskCreate(
-                project_id=seed_context.project_id,
-                title="Invalid Creator",
             ),
-            created_by_id=uuid.uuid4(),
+            current_user=current_user,
         )
