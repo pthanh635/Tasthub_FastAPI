@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, cast
 
 from redis.asyncio import Redis
+
+logger = logging.getLogger(__name__)
 
 
 class RedisCache:
@@ -23,9 +26,9 @@ class RedisCache:
         self._client = Redis.from_url(self._url, decode_responses=False)
         try:
             await self._client.ping()
-        except Exception:
+        except Exception as exc:
+            logger.warning("Failed to connect to Redis at %s: %s", self._url, exc)
             await self.close()
-
         else:
             self._available = True
 
@@ -40,14 +43,16 @@ class RedisCache:
             return None
         try:
             value = await self._client.get(key)  # type: ignore[union-attr]
-        except Exception:
+        except Exception as exc:
+            logger.warning("Redis GET failed for key '%s': %s", key, exc)
             return None
         if value is None:
             return None
         try:
             decoded = json.loads(value)
             return cast(dict[str, Any], decoded)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as exc:
+            logger.warning("Failed to decode JSON cache value for key '%s': %s", key, exc)
             return None
 
     async def set(self, key: str, value: dict[str, Any]) -> None:
@@ -59,7 +64,8 @@ class RedisCache:
                 json.dumps(value),
                 ex=self._ttl_seconds,
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning("Redis SET failed for key '%s': %s", key, exc)
             return
 
     async def increment_version(self) -> None:
@@ -67,7 +73,8 @@ class RedisCache:
             return
         try:
             await self._client.incr("taskhub:cache:version")  # type: ignore[union-attr]
-        except Exception:
+        except Exception as exc:
+            logger.warning("Redis INCR failed for version key: %s", exc)
             return
 
     async def get_version(self) -> int:
@@ -75,6 +82,7 @@ class RedisCache:
             return 0
         try:
             version = await self._client.get("taskhub:cache:version")  # type: ignore[union-attr]
-        except Exception:
+        except Exception as exc:
+            logger.warning("Redis GET failed for version key: %s", exc)
             return 0
         return int(version or 0)

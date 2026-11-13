@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 from uuid import uuid4
 
@@ -9,6 +10,19 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.types import ASGIApp
 
 from app.core.cache import RedisCache
+
+REQUEST_ID_REGEX = re.compile(r"^[a-zA-Z0-9_\-]{1,64}$")
+
+
+def _sanitize_request_id(raw_id: str | None) -> str:
+    """Validate request ID from client header or generate a fresh UUID4.
+
+    Accepts alphanumeric characters, hyphens, and underscores up to 64 chars.
+    Prevents header injection and oversized values.
+    """
+    if raw_id and REQUEST_ID_REGEX.match(raw_id):
+        return raw_id
+    return str(uuid4())
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -19,7 +33,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: RequestResponseEndpoint,
     ) -> Response:
-        request_id = request.headers.get("X-Request-ID", str(uuid4()))
+        request_id = _sanitize_request_id(request.headers.get("X-Request-ID"))
         request.state.request_id = request_id
         started = time.perf_counter()
         response = await call_next(request)
@@ -69,12 +83,10 @@ class RedisCacheMiddleware(BaseHTTPMiddleware):
             response.headers["X-Cache"] = "BYPASS"
             return response
 
-        if response.body is None:
-            body = b"".join(
-                [chunk async for chunk in response.body_iterator]
-            )
-        else:
-            body = bytes(response.body)
+        # BaseHTTPMiddleware returns _StreamingResponse; consume body_iterator directly
+        body = b"".join(
+            [chunk async for chunk in response.body_iterator]
+        )
         await self._cache.set(
             key,
             {
@@ -83,11 +95,14 @@ class RedisCacheMiddleware(BaseHTTPMiddleware):
                 "status_code": response.status_code,
             },
         )
+        response_headers = dict(response.headers)
+        response_headers["X-Cache"] = "MISS"
+        response_headers.pop("content-length", None)
         return Response(
             content=body,
             status_code=response.status_code,
             media_type=content_type.split(";", 1)[0],
-            headers={"X-Cache": "MISS"},
+            headers=response_headers,
         )
 
     async def _cache_key(self, request: Request) -> str:
