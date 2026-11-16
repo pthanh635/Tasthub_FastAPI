@@ -18,7 +18,8 @@ def test_resolve_env_files_by_environment() -> None:
     assert resolve_env_files("PRODUCTION") == (".env", ".env.production")
 
 
-def test_settings_environment_flags() -> None:
+def test_settings_environment_flags(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("APP_ENV", raising=False)
     dev = Settings(
         _env_file=None,
         app_env=AppEnvironment.DEVELOPMENT,
@@ -43,7 +44,13 @@ def test_settings_environment_flags() -> None:
     assert staging_cfg.is_staging is True
 
 
-def test_settings_multi_environment_file_override(tmp_path: Path) -> None:
+def test_settings_multi_environment_file_override(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("APP_NAME", raising=False)
+    monkeypatch.delenv("CACHE_TTL_SECONDS", raising=False)
+
     base_env = tmp_path / ".env"
     base_env.write_text(
         f"APP_NAME=BaseApp\nCACHE_TTL_SECONDS=30\nJWT_SECRET_KEY={VALID_SECRET}\n",
