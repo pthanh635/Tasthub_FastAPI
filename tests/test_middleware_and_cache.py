@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import AsyncGenerator
 from typing import Any
-from unittest.mock import AsyncMock
 
+import pytest
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, PlainTextResponse
 from httpx import ASGITransport, AsyncClient
-import pytest
 
 from app.core.cache import RedisCache
 from app.core.middleware import (
@@ -63,7 +63,7 @@ def fake_redis_cache() -> RedisCache:
 @pytest.fixture
 async def cached_test_client(
     fake_redis_cache: RedisCache,
-) -> AsyncClient:
+) -> AsyncGenerator[AsyncClient, None]:
     test_app = FastAPI()
     test_app.add_middleware(RedisCacheMiddleware, cache=fake_redis_cache)
     test_app.add_middleware(RequestContextMiddleware)

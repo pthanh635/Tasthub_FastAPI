@@ -9,6 +9,7 @@ from app.api.v1.dependencies import (
     get_task_service,
 )
 from app.core.constants import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT
+from app.core.openapi import error_responses
 from app.schemas.task import (
     TaskCreate,
     TaskListResponse,
@@ -27,14 +28,11 @@ router = APIRouter(prefix="/tasks", tags=["Tasks"])
     response_model=TaskResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new task",
-    responses={
-        201: {"description": "Task created successfully"},
-        400: {"description": "Bad Request or project archived"},
-        401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient workspace permissions"},
-        404: {"description": "Project or assignee not found"},
-        422: {"description": "Validation error"},
-    },
+    description=(
+        "Create a task in an `ACTIVE` project. Requires `OWNER`, `ADMIN`, or `EDITOR` "
+        "role in the project's workspace."
+    ),
+    responses=error_responses(400, 401, 403, 404),
 )
 async def create_task(
     data: TaskCreate,
@@ -49,12 +47,11 @@ async def create_task(
     response_model=TaskListResponse,
     status_code=status.HTTP_200_OK,
     summary="List tasks accessible to current user with pagination",
-    responses={
-        200: {"description": "Paginated list of tasks"},
-        401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient workspace permissions"},
-        404: {"description": "Project filter not found"},
-    },
+    description=(
+        "List tasks across workspaces where the user is a member, optionally filtered "
+        "by `project_id`."
+    ),
+    responses=error_responses(401, 403, 404),
 )
 async def list_tasks(
     current_user: CurrentUserDep,
@@ -85,12 +82,8 @@ async def list_tasks(
     response_model=TaskResponse,
     status_code=status.HTTP_200_OK,
     summary="Get a task by UUID",
-    responses={
-        200: {"description": "Task retrieved successfully"},
-        401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient workspace permissions"},
-        404: {"description": "Task not found"},
-    },
+    description="Retrieve a single task by UUID. Requires membership in the parent workspace.",
+    responses=error_responses(401, 403, 404),
 )
 async def get_task(
     task_id: UUID,
@@ -105,14 +98,11 @@ async def get_task(
     response_model=TaskResponse,
     status_code=status.HTTP_200_OK,
     summary="Update all editable fields of a task",
-    responses={
-        200: {"description": "Task updated successfully"},
-        400: {"description": "Bad Request or assignee not in workspace"},
-        401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient workspace permissions"},
-        404: {"description": "Task or assignee not found"},
-        422: {"description": "Validation error"},
-    },
+    description=(
+        "Replace all editable fields of a task. Requires `OWNER`, `ADMIN`, or `EDITOR` "
+        "role in the workspace."
+    ),
+    responses=error_responses(400, 401, 403, 404),
 )
 async def replace_task(
     task_id: UUID,
@@ -128,14 +118,11 @@ async def replace_task(
     response_model=TaskResponse,
     status_code=status.HTTP_200_OK,
     summary="Partially update a task",
-    responses={
-        200: {"description": "Task patched successfully"},
-        400: {"description": "Bad Request or assignee not in workspace"},
-        401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient workspace permissions"},
-        404: {"description": "Task or assignee not found"},
-        422: {"description": "Validation error"},
-    },
+    description=(
+        "Partially update task fields (`title`, `description`, `status`, `priority`, "
+        "`assignee_id`, `due_date`). Requires `OWNER`, `ADMIN`, or `EDITOR` role."
+    ),
+    responses=error_responses(400, 401, 403, 404),
 )
 async def patch_task(
     task_id: UUID,
@@ -150,12 +137,11 @@ async def patch_task(
     "/{task_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a task by UUID",
-    responses={
-        204: {"description": "Task deleted successfully"},
-        401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient permissions or not task creator"},
-        404: {"description": "Task not found"},
-    },
+    description=(
+        "Delete a task. Workspace `OWNER`/`ADMIN` can delete any task; `EDITOR` can "
+        "only delete tasks they personally created."
+    ),
+    responses=error_responses(401, 403, 404),
 )
 async def delete_task(
     task_id: UUID,
@@ -164,3 +150,4 @@ async def delete_task(
 ) -> Response:
     await service.delete(task_id, current_user=current_user)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+

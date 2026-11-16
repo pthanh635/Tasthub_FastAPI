@@ -15,14 +15,22 @@ class RegisterRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    email: EmailStr = Field(max_length=EMAIL_MAX_LENGTH)
+    email: EmailStr = Field(
+        max_length=EMAIL_MAX_LENGTH,
+        description="Unique user email address (normalized to lowercase).",
+        examples=["developer@taskhub.dev"],
+    )
     password: str = Field(
         min_length=PASSWORD_MIN_LENGTH,
         max_length=PASSWORD_MAX_BYTES,
+        description="Account password (8 to 72 UTF-8 bytes).",
+        examples=["StrongPass123!"],
     )
     full_name: str = Field(
         min_length=USER_FULL_NAME_MIN_LENGTH,
         max_length=USER_FULL_NAME_MAX_LENGTH,
+        description="Display name of the user.",
+        examples=["Nguyen Van A"],
     )
 
     @field_validator("email", "full_name")
@@ -39,8 +47,17 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     """Login payload. Password whitespaces are strictly preserved."""
 
-    email: EmailStr = Field(max_length=EMAIL_MAX_LENGTH)
-    password: str = Field(min_length=1, max_length=PASSWORD_MAX_BYTES)
+    email: EmailStr = Field(
+        max_length=EMAIL_MAX_LENGTH,
+        description="Registered user email address.",
+        examples=["developer@taskhub.dev"],
+    )
+    password: str = Field(
+        min_length=1,
+        max_length=PASSWORD_MAX_BYTES,
+        description="Account password.",
+        examples=["StrongPass123!"],
+    )
 
     @field_validator("email")
     @classmethod
@@ -54,14 +71,39 @@ class LoginRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
+    """JWT access and refresh token pair issued upon login or token rotation."""
+
+    access_token: str = Field(
+        description="Short-lived JWT access token (`type=access`) used in Authorization header.",
+        examples=["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."],
+    )
+    refresh_token: str = Field(
+        description="Long-lived single-use JWT refresh token (`type=refresh`) for token rotation.",
+        examples=["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."],
+    )
+    token_type: str = Field(
+        default="bearer",
+        description="OAuth2 token scheme.",
+        examples=["bearer"],
+    )
 
 
 class RefreshTokenRequest(BaseSchema):
-    refresh_token: str = Field(min_length=1)
+    """Payload for rotating an active refresh token into a new JWT pair."""
+
+    refresh_token: str = Field(
+        min_length=1,
+        description="Active JWT refresh token (`type=refresh`) to rotate.",
+        examples=["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."],
+    )
 
 
 class LogoutRequest(BaseSchema):
-    refresh_token: str = Field(min_length=1)
+    """Payload for revoking a refresh token during logout."""
+
+    refresh_token: str = Field(
+        min_length=1,
+        description="Refresh token owned by the authenticated user to revoke.",
+        examples=["eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."],
+    )
+
