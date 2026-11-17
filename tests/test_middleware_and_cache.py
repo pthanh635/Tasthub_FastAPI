@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -87,6 +89,18 @@ async def cached_test_client(
     async def get_error() -> JSONResponse:
         return JSONResponse(status_code=400, content={"error": "bad request"})
 
+    @test_app.get("/health")
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @test_app.get("/private")
+    async def private() -> dict[str, str]:
+        return {"secret": "response"}
+
+    @test_app.post("/api/v1/auth/refresh")
+    async def refresh() -> dict[str, str]:
+        return {"status": "refreshed"}
+
     transport = ASGITransport(app=test_app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         yield client
@@ -153,7 +167,32 @@ async def test_redis_cache_connect_failure_logs_warning(
     with caplog.at_level(logging.WARNING):
         await cache.connect()
     assert not cache.available
-    assert "Failed to connect to Redis" in caplog.text
+    assert "Redis connection unavailable" in caplog.text
+    assert "nonexistent-host" not in caplog.text
+
+
+async def test_redis_connection_logs_do_not_include_url_or_password(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import app.core.cache as cache_module
+
+    class FailingRedisClient(FakeRedisClient):
+        async def ping(self) -> bool:
+            raise ConnectionError("redis://user:private-password@redis.internal")
+
+    monkeypatch.setattr(
+        cache_module.Redis,
+        "from_url",
+        lambda _url, **_kwargs: FailingRedisClient(),
+    )
+    cache = RedisCache(
+        "redis://user:private-password@redis.internal:6379/0", ttl_seconds=30
+    )
+    with caplog.at_level(logging.WARNING):
+        await cache.connect()
+    assert "private-password" not in caplog.text
+    assert "redis.internal" not in caplog.text
 
 
 async def test_redis_cache_operations_log_warning(
@@ -173,10 +212,7 @@ async def test_redis_cache_operations_log_warning(
         await cache.increment_version()
         assert await cache.get_version() == 0
 
-    assert "Redis GET failed for key 'test_key'" in caplog.text
-    assert "Redis SET failed for key 'test_key'" in caplog.text
-    assert "Redis INCR failed for version key" in caplog.text
-    assert "Redis GET failed for version key" in caplog.text
+    assert "Redis operation failed; cache requests will bypass it" in caplog.text
 
 
 # --- RedisCacheMiddleware MISS -> HIT -> Invalidation tests ---
@@ -224,3 +260,71 @@ async def test_cache_bypass_for_non_json_and_errors(
     error_res = await cached_test_client.get("/error")
     assert error_res.status_code == 400
     assert error_res.headers["X-Cache"] == "BYPASS"
+
+
+async def test_cache_bypasses_health_sensitive_and_authorized_requests(
+    cached_test_client: AsyncClient,
+    fake_redis_cache: RedisCache,
+) -> None:
+    health_response = await cached_test_client.get("/health")
+    private_response = await cached_test_client.get(
+        "/private", headers={"Authorization": "Bearer access-token"}
+    )
+    refresh_response = await cached_test_client.post("/api/v1/auth/refresh")
+
+    assert health_response.headers["X-Cache"] == "BYPASS"
+    assert private_response.headers["X-Cache"] == "BYPASS"
+    assert refresh_response.headers["X-Cache"] == "BYPASS"
+    assert await fake_redis_cache.get_version() == 0
+
+
+async def test_cache_reconnects_after_backoff_and_sets_socket_timeouts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.core.cache as cache_module
+
+    cache = RedisCache("redis://user:password@redis.internal:6379/0", ttl_seconds=60)
+    created_kwargs: list[dict[str, Any]] = []
+
+    def make_client(url: str, **kwargs: Any) -> FakeRedisClient:
+        assert url.startswith("redis://user:")
+        created_kwargs.append(kwargs)
+        return FakeRedisClient()
+
+    monkeypatch.setattr(cache_module.Redis, "from_url", make_client)
+    cache._next_retry_at = time.monotonic() + 60
+    assert await cache.get("key") is None
+    assert created_kwargs == []
+
+    cache._next_retry_at = 0
+    assert await cache.get("key") is None
+    assert cache.available
+    assert created_kwargs[0]["socket_connect_timeout"] > 0
+    assert created_kwargs[0]["socket_timeout"] > 0
+    await cache.close()
+
+
+async def test_unavailable_redis_bypasses_cache_and_returns_api_response(
+    cached_test_client: AsyncClient,
+    fake_redis_cache: RedisCache,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.core.cache as cache_module
+
+    class UnavailableRedisClient(FakeRedisClient):
+        async def ping(self) -> bool:
+            raise ConnectionError("Redis is offline")
+
+    monkeypatch.setattr(
+        cache_module.Redis,
+        "from_url",
+        lambda _url, **_kwargs: UnavailableRedisClient(),
+    )
+    fake_redis_cache._client = None
+    fake_redis_cache._available = False
+
+    response = await asyncio.wait_for(cached_test_client.get("/items"), timeout=1)
+
+    assert response.status_code == 200
+    assert response.headers["X-Cache"] == "BYPASS"
+    assert response.json()["items"] == ["item1", "item2"]

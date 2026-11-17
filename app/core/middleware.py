@@ -10,8 +10,23 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.types import ASGIApp
 
 from app.core.cache import RedisCache
+from app.core.constants import (
+    AUTH_PATH_PREFIX,
+    AUTHORIZATION_HEADER,
+    CACHE_STATUS_HEADER,
+    CACHEABLE_METHODS,
+    HEALTH_PATH,
+    HTTP_ERROR_STATUS_THRESHOLD,
+    HTTP_OK_STATUS,
+    JSON_MEDIA_TYPE,
+    REDIS_CACHE_KEY_PREFIX,
+    REQUEST_ID_HEADER,
+    REQUEST_ID_MAX_LENGTH,
+    REQUEST_PROCESS_TIME_HEADER,
+    CacheStatus,
+)
 
-REQUEST_ID_REGEX = re.compile(r"^[a-zA-Z0-9_\-]{1,64}$")
+REQUEST_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 def _sanitize_request_id(raw_id: str | None) -> str:
@@ -20,7 +35,7 @@ def _sanitize_request_id(raw_id: str | None) -> str:
     Accepts alphanumeric characters, hyphens, and underscores up to 64 chars.
     Prevents header injection and oversized values.
     """
-    if raw_id and REQUEST_ID_REGEX.match(raw_id):
+    if raw_id and len(raw_id) <= REQUEST_ID_MAX_LENGTH and REQUEST_ID_REGEX.match(raw_id):
         return raw_id
     return str(uuid4())
 
@@ -33,13 +48,13 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: RequestResponseEndpoint,
     ) -> Response:
-        request_id = _sanitize_request_id(request.headers.get("X-Request-ID"))
+        request_id = _sanitize_request_id(request.headers.get(REQUEST_ID_HEADER))
         request.state.request_id = request_id
         started = time.perf_counter()
         response = await call_next(request)
         elapsed_ms = (time.perf_counter() - started) * 1000
-        response.headers["X-Request-ID"] = request_id
-        response.headers["X-Process-Time-Ms"] = f"{elapsed_ms:.2f}"
+        response.headers[REQUEST_ID_HEADER] = request_id
+        response.headers[REQUEST_PROCESS_TIME_HEADER] = f"{elapsed_ms:.2f}"
         return response
 
 
@@ -55,16 +70,28 @@ class RedisCacheMiddleware(BaseHTTPMiddleware):
         request: Request,
         call_next: RequestResponseEndpoint,
     ) -> Response:
-        if not self._cache.available:
+        path = request.url.path
+        is_auth_path = path.startswith(AUTH_PATH_PREFIX) or "/auth/" in path
+        is_sensitive = (
+            path == HEALTH_PATH
+            or is_auth_path
+            or AUTHORIZATION_HEADER in request.headers
+        )
+        if is_sensitive:
             response = await call_next(request)
-            response.headers["X-Cache"] = "BYPASS"
+            response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
             return response
 
-        if request.method not in {"GET", "HEAD"}:
+        if not await self._cache.ensure_available():
             response = await call_next(request)
-            if response.status_code < 400:
+            response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
+            return response
+
+        if request.method not in CACHEABLE_METHODS:
+            response = await call_next(request)
+            if response.status_code < HTTP_ERROR_STATUS_THRESHOLD:
                 await self._cache.increment_version()
-            response.headers["X-Cache"] = "BYPASS"
+            response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
             return response
 
         key = await self._cache_key(request)
@@ -74,13 +101,13 @@ class RedisCacheMiddleware(BaseHTTPMiddleware):
                 content=cached["body"].encode("utf-8"),
                 status_code=cached["status_code"],
                 media_type=cached["media_type"],
-                headers={"X-Cache": "HIT"},
+                headers={CACHE_STATUS_HEADER: CacheStatus.HIT},
             )
 
         response = await call_next(request)
         content_type = response.headers.get("content-type", "")
-        if response.status_code != 200 or "application/json" not in content_type:
-            response.headers["X-Cache"] = "BYPASS"
+        if response.status_code != HTTP_OK_STATUS or JSON_MEDIA_TYPE not in content_type:
+            response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
             return response
 
         # BaseHTTPMiddleware returns _StreamingResponse; consume body_iterator directly
@@ -96,7 +123,7 @@ class RedisCacheMiddleware(BaseHTTPMiddleware):
             },
         )
         response_headers = dict(response.headers)
-        response_headers["X-Cache"] = "MISS"
+        response_headers[CACHE_STATUS_HEADER] = CacheStatus.MISS
         response_headers.pop("content-length", None)
         return Response(
             content=body,
@@ -113,4 +140,4 @@ class RedisCacheMiddleware(BaseHTTPMiddleware):
             f"{version}:{request.method}:{request.url.path}?"
             f"{request.url.query}:{auth_fingerprint}"
         )
-        return f"taskhub:cache:{hashlib.sha256(raw_key.encode()).hexdigest()}"
+        return f"{REDIS_CACHE_KEY_PREFIX}{hashlib.sha256(raw_key.encode()).hexdigest()}"
