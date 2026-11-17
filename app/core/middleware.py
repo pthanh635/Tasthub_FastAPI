@@ -3,10 +3,12 @@ from __future__ import annotations
 import hashlib
 import re
 import time
+from collections.abc import AsyncIterator
 from uuid import uuid4
 
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import StreamingResponse
 from starlette.types import ASGIApp
 
 from app.core.cache import RedisCache
@@ -15,7 +17,6 @@ from app.core.constants import (
     AUTHORIZATION_HEADER,
     CACHE_STATUS_HEADER,
     CACHEABLE_METHODS,
-    HEALTH_PATH,
     HTTP_ERROR_STATUS_THRESHOLD,
     HTTP_OK_STATUS,
     JSON_MEDIA_TYPE,
@@ -27,6 +28,8 @@ from app.core.constants import (
 )
 
 REQUEST_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]+$")
+CACHE_MAX_BUFFER_BYTES = 1024 * 1024
+NEVER_CACHE_PATHS = frozenset({"/health", "/docs", "/redoc", "/openapi.json"})
 
 
 def _sanitize_request_id(raw_id: str | None) -> str:
@@ -61,9 +64,15 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
 class RedisCacheMiddleware(BaseHTTPMiddleware):
     """Cache successful JSON GET responses and invalidate them after writes."""
 
-    def __init__(self, app: ASGIApp, cache: RedisCache) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        cache: RedisCache,
+        public_get_paths: frozenset[str] = frozenset(),
+    ) -> None:
         super().__init__(app)
         self._cache = cache
+        self._public_get_paths = public_get_paths
 
     async def dispatch(
         self,
@@ -71,18 +80,21 @@ class RedisCacheMiddleware(BaseHTTPMiddleware):
         call_next: RequestResponseEndpoint,
     ) -> Response:
         path = request.url.path
-        is_auth_path = path.startswith(AUTH_PATH_PREFIX) or "/auth/" in path
-        is_sensitive = (
-            path == HEALTH_PATH
-            or is_auth_path
-            or AUTHORIZATION_HEADER in request.headers
+        is_auth_path = (
+            path == AUTH_PATH_PREFIX
+            or path.startswith(f"{AUTH_PATH_PREFIX}/")
+            or path.endswith("/auth")
+            or "/auth/" in path
         )
-        if is_sensitive:
-            response = await call_next(request)
-            response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
-            return response
-
-        if not await self._cache.ensure_available():
+        has_authentication = (
+            AUTHORIZATION_HEADER in request.headers or "cookie" in request.headers
+        )
+        if (
+            path in NEVER_CACHE_PATHS
+            or path.startswith(("/docs/", "/redoc/"))
+            or is_auth_path
+            or has_authentication
+        ):
             response = await call_next(request)
             response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
             return response
@@ -94,14 +106,29 @@ class RedisCacheMiddleware(BaseHTTPMiddleware):
             response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
             return response
 
+        if request.method != "GET" or path not in self._public_get_paths:
+            response = await call_next(request)
+            response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
+            return response
+
+        if not await self._cache.ensure_available():
+            response = await call_next(request)
+            response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
+            return response
+
         key = await self._cache_key(request)
         cached = await self._cache.get(key)
         if cached is not None:
-            return Response(
-                content=cached["body"].encode("utf-8"),
-                status_code=cached["status_code"],
-                media_type=cached["media_type"],
-                headers={CACHE_STATUS_HEADER: CacheStatus.HIT},
+            headers = [
+                (name.encode("latin-1"), value.encode("latin-1"))
+                for name, value in cached.get("headers", [])
+                if name.lower() != CACHE_STATUS_HEADER.lower()
+            ]
+            return self._response_with_raw_headers(
+                cached["body"].encode("utf-8"),
+                cached["status_code"],
+                headers,
+                CacheStatus.HIT,
             )
 
         response = await call_next(request)
@@ -110,27 +137,99 @@ class RedisCacheMiddleware(BaseHTTPMiddleware):
             response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
             return response
 
-        # BaseHTTPMiddleware returns _StreamingResponse; consume body_iterator directly
-        body = b"".join(
-            [chunk async for chunk in response.body_iterator]
-        )
+        if any(name.lower() == b"set-cookie" for name, _ in response.raw_headers):
+            response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
+            return response
+
+        body_iterator = response.body_iterator
+        if not any(name.lower() == b"content-length" for name, _ in response.raw_headers):
+            streamed = StreamingResponse(body_iterator, status_code=response.status_code)
+            streamed.raw_headers = self._headers_with_cache_status(
+                response.raw_headers, CacheStatus.BYPASS
+            )
+            return streamed
+
+        chunks: list[bytes] = []
+        size = 0
+        async for chunk in body_iterator:
+            chunks.append(chunk)
+            size += len(chunk)
+            if size > CACHE_MAX_BUFFER_BYTES:
+                async def replay() -> AsyncIterator[bytes]:
+                    for buffered_chunk in chunks:
+                        yield buffered_chunk
+                    async for remaining_chunk in body_iterator:
+                        yield remaining_chunk
+
+                streamed = StreamingResponse(replay(), status_code=response.status_code)
+                streamed.raw_headers = self._headers_with_cache_status(
+                    response.raw_headers, CacheStatus.BYPASS
+                )
+                return streamed
+
+        body = b"".join(chunks)
+        if any(
+            name.lower() == b"content-encoding" and value.lower() != b"identity"
+            for name, value in response.raw_headers
+        ):
+            return self._response_with_raw_headers(
+                body,
+                response.status_code,
+                response.raw_headers,
+                CacheStatus.BYPASS,
+            )
+
         await self._cache.set(
             key,
             {
                 "body": body.decode("utf-8"),
                 "media_type": content_type.split(";", 1)[0],
                 "status_code": response.status_code,
+                "headers": [
+                    (name.decode("latin-1"), value.decode("latin-1"))
+                    for name, value in response.raw_headers
+                ],
             },
         )
-        response_headers = dict(response.headers)
-        response_headers[CACHE_STATUS_HEADER] = CacheStatus.MISS
-        response_headers.pop("content-length", None)
-        return Response(
-            content=body,
-            status_code=response.status_code,
-            media_type=content_type.split(";", 1)[0],
-            headers=response_headers,
+        return self._response_with_raw_headers(
+            body,
+            response.status_code,
+            response.raw_headers,
+            CacheStatus.MISS,
         )
+
+    @staticmethod
+    def _headers_with_cache_status(
+        raw_headers: list[tuple[bytes, bytes]], status: CacheStatus
+    ) -> list[tuple[bytes, bytes]]:
+        return [
+            (name, value)
+            for name, value in raw_headers
+            if name.lower() != CACHE_STATUS_HEADER.lower().encode()
+        ] + [
+            (CACHE_STATUS_HEADER.lower().encode(), status.value.encode()),
+        ]
+
+    @staticmethod
+    def _response_with_raw_headers(
+        body: bytes,
+        status_code: int,
+        raw_headers: list[tuple[bytes, bytes]],
+        cache_status: CacheStatus,
+    ) -> Response:
+        response = Response(content=body, status_code=status_code)
+        response.raw_headers = [
+            (name, value)
+            for name, value in raw_headers
+            if name.lower() not in {b"content-length", CACHE_STATUS_HEADER.lower().encode()}
+        ]
+        response.raw_headers.extend(
+            [
+                (b"content-length", str(len(body)).encode()),
+                (CACHE_STATUS_HEADER.lower().encode(), cache_status.value.encode()),
+            ]
+        )
+        return response
 
     async def _cache_key(self, request: Request) -> str:
         auth = request.headers.get("Authorization", "")

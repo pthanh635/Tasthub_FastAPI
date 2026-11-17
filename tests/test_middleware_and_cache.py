@@ -8,8 +8,8 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
 from httpx import ASGITransport, AsyncClient
 
 from app.core.cache import RedisCache
@@ -67,7 +67,11 @@ async def cached_test_client(
     fake_redis_cache: RedisCache,
 ) -> AsyncGenerator[AsyncClient, None]:
     test_app = FastAPI()
-    test_app.add_middleware(RedisCacheMiddleware, cache=fake_redis_cache)
+    test_app.add_middleware(
+        RedisCacheMiddleware,
+        cache=fake_redis_cache,
+        public_get_paths=frozenset({"/items", "/cookies", "/large", "/stream"}),
+    )
     test_app.add_middleware(RequestContextMiddleware)
 
     counter = {"views": 0}
@@ -96,6 +100,26 @@ async def cached_test_client(
     @test_app.get("/private")
     async def private() -> dict[str, str]:
         return {"secret": "response"}
+
+    @test_app.get("/cookies")
+    async def cookies() -> JSONResponse:
+        response = JSONResponse({"ok": True})
+        response.raw_headers.extend(
+            [(b"set-cookie", b"first=1"), (b"set-cookie", b"second=2")]
+        )
+        return response
+
+    @test_app.get("/large")
+    async def large() -> JSONResponse:
+        return JSONResponse({"payload": "x" * (1024 * 1024 + 32)})
+
+    @test_app.get("/stream")
+    async def stream() -> StreamingResponse:
+        async def chunks() -> AsyncGenerator[bytes, None]:
+            yield b'{"part":'
+            yield b'"one"}'
+
+        return StreamingResponse(chunks(), media_type="application/json")
 
     @test_app.post("/api/v1/auth/refresh")
     async def refresh() -> dict[str, str]:
@@ -248,6 +272,82 @@ async def test_cache_miss_then_hit_then_invalidation(
     assert res3.headers["X-Cache"] == "MISS"
     data3 = res3.json()
     assert data3["views"] == 2  # Incremented because handler was executed
+
+
+async def test_public_cache_hit(cached_test_client: AsyncClient) -> None:
+    first = await cached_test_client.get("/items")
+    second = await cached_test_client.get("/items")
+    assert first.headers["X-Cache"] == "MISS"
+    assert second.headers["X-Cache"] == "HIT"
+    assert second.json()["views"] == 1
+
+
+async def test_multiple_set_cookie_headers_are_preserved(
+    cached_test_client: AsyncClient,
+) -> None:
+    response = await cached_test_client.get("/cookies")
+    assert response.headers.get_list("set-cookie") == ["first=1", "second=2"]
+    assert response.headers["X-Cache"] == "BYPASS"
+
+
+async def test_large_json_response_replays_all_bytes(cached_test_client: AsyncClient) -> None:
+    response = await cached_test_client.get("/large")
+    assert response.status_code == 200
+    assert len(response.json()["payload"]) == 1024 * 1024 + 32
+    assert response.headers["X-Cache"] == "BYPASS"
+
+
+async def test_streaming_json_response_is_replayed(cached_test_client: AsyncClient) -> None:
+    response = await cached_test_client.get("/stream")
+    assert response.content == b'{"part":"one"}'
+    assert response.headers["X-Cache"] == "BYPASS"
+
+
+async def test_authentication_cookie_bypasses_cache(cached_test_client: AsyncClient) -> None:
+    first = await cached_test_client.get("/items")
+    with_cookie = await cached_test_client.get(
+        "/items", headers={"Cookie": "access_token=token"}
+    )
+    next_public = await cached_test_client.get("/items")
+    assert first.headers["X-Cache"] == "MISS"
+    assert with_cookie.headers["X-Cache"] == "BYPASS"
+    assert with_cookie.json()["views"] == 2
+    assert next_public.headers["X-Cache"] == "HIT"
+    assert next_public.json()["views"] == 1
+
+
+async def test_expired_token_never_uses_cached_response(
+    fake_redis_cache: RedisCache,
+) -> None:
+    test_app = FastAPI()
+    token_state = {"expired": False, "checks": 0}
+
+    async def authenticate(authorization: str | None = Header(default=None)) -> None:
+        token_state["checks"] += 1
+        if authorization != "Bearer temporary" or token_state["expired"]:
+            raise HTTPException(status_code=401, detail="Invalid token")
+
+    test_app.add_middleware(
+        RedisCacheMiddleware,
+        cache=fake_redis_cache,
+        public_get_paths=frozenset({"/protected"}),
+    )
+
+    @test_app.get("/protected", dependencies=[Depends(authenticate)])
+    async def protected() -> dict[str, str]:
+        return {"secret": "fresh"}
+
+    transport = ASGITransport(app=test_app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+        success = await client.get("/protected", headers={"Authorization": "Bearer temporary"})
+        token_state["expired"] = True
+        expired = await client.get(
+            "/protected", headers={"Authorization": "Bearer temporary"}
+        )
+
+    assert success.status_code == 200
+    assert expired.status_code == 401
+    assert token_state["checks"] == 2
 
 
 async def test_cache_bypass_for_non_json_and_errors(
