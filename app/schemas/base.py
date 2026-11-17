@@ -1,14 +1,15 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.constants import PASSWORD_MAX_BYTES
+from app.core.messages import ErrorMessages
 
 
 def validate_password_byte_length(value: str) -> str:
     """Ensure password does not exceed bcrypt's 72 UTF-8 byte limit."""
     if len(value.encode("utf-8")) > PASSWORD_MAX_BYTES:
-        raise ValueError(
-            f"Password must not exceed {PASSWORD_MAX_BYTES} bytes in UTF-8 encoding"
-        )
+        raise ValueError(ErrorMessages.PASSWORD_MAX_BYTES.format(max_bytes=PASSWORD_MAX_BYTES))
     return value
 
 
@@ -45,7 +46,7 @@ class InternalErrorResponse(BaseModel):
 class HealthCheckResponse(BaseModel):
     """Liveness health check payload."""
 
-    status: str = Field(
+    status: Literal["ok"] = Field(
         default="ok",
         description="Service operational status.",
         examples=["ok"],

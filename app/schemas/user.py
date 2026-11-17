@@ -17,6 +17,7 @@ from app.core.constants import (
     USER_FULL_NAME_MAX_LENGTH,
     USER_FULL_NAME_MIN_LENGTH,
 )
+from app.core.messages import ErrorMessages
 from app.models.enums import UserRole
 from app.schemas.base import BaseSchema, validate_password_byte_length
 
@@ -64,7 +65,9 @@ class UserUpdate(BaseSchema):
     @model_validator(mode="after")
     def reject_explicit_nulls(self) -> Self:
         if "full_name" in self.model_fields_set and self.full_name is None:
-            raise ValueError("full_name cannot be null")
+            raise ValueError(
+                ErrorMessages.FIELD_CANNOT_BE_NULL.format(field_name="full_name")
+            )
         return self
 
 
@@ -98,7 +101,7 @@ class AdminUserUpdate(BaseSchema):
                 field_name in self.model_fields_set
                 and getattr(self, field_name) is None
             ):
-                raise ValueError(f"{field_name} cannot be null")
+                raise ValueError(ErrorMessages.FIELD_CANNOT_BE_NULL.format(field_name=field_name))
         return self
 
 

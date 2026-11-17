@@ -33,6 +33,26 @@ INSECURE_PLACEHOLDER_SECRETS: frozenset[str] = frozenset(
         "changeme-secret-key-must-be-at-least-32-characters-long",
     }
 )
+PLACEHOLDER_CREDENTIAL_PATTERN: str = r"replace_with|changeme|example|placeholder|dummy"
+ENV_FILE_NAME: str = ".env"
+ENV_FILE_PREFIX: str = ".env."
+REDIS_SOCKET_CONNECT_TIMEOUT_SECONDS: float = 1.0
+REDIS_SOCKET_TIMEOUT_SECONDS: float = 1.0
+REDIS_RECONNECT_INITIAL_DELAY_SECONDS: float = 1.0
+REDIS_RECONNECT_MAX_DELAY_SECONDS: float = 30.0
+REDIS_CACHE_VERSION_KEY: str = "taskhub:cache:version"
+REDIS_CACHE_KEY_PREFIX: str = "taskhub:cache:"
+HEALTH_PATH: str = "/health"
+AUTH_PATH_PREFIX: str = "/api/v1/auth"
+REQUEST_ID_HEADER: str = "X-Request-ID"
+REQUEST_PROCESS_TIME_HEADER: str = "X-Process-Time-Ms"
+CACHE_STATUS_HEADER: str = "X-Cache"
+AUTHORIZATION_HEADER: str = "Authorization"
+JSON_MEDIA_TYPE: str = "application/json"
+HTTP_OK_STATUS: int = 200
+HTTP_ERROR_STATUS_THRESHOLD: int = 400
+REQUEST_ID_MAX_LENGTH: int = 64
+CACHEABLE_METHODS: frozenset[str] = frozenset({"GET", "HEAD"})
 DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 DEFAULT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 TOKEN_HASH_LENGTH: int = 64
@@ -55,4 +75,10 @@ MAX_PAGE_LIMIT: int = 100
 class TokenType(StrEnum):
     ACCESS = "access"
     REFRESH = "refresh"
+
+
+class CacheStatus(StrEnum):
+    HIT = "HIT"
+    MISS = "MISS"
+    BYPASS = "BYPASS"
 

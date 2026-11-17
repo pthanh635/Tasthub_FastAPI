@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.core.constants import ENTITY_NAME_MAX_LENGTH, ENTITY_NAME_MIN_LENGTH
+from app.core.messages import ErrorMessages
 from app.models.enums import WorkspaceRole
 from app.schemas.base import BaseSchema
 
@@ -44,7 +45,7 @@ class WorkspaceUpdate(BaseSchema):
     @model_validator(mode="after")
     def reject_explicit_null_name(self) -> Self:
         if "name" in self.model_fields_set and self.name is None:
-            raise ValueError("name cannot be null")
+            raise ValueError(ErrorMessages.FIELD_CANNOT_BE_NULL.format(field_name="name"))
         return self
 
 

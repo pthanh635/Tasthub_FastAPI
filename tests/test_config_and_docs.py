@@ -10,6 +10,7 @@ from app.main import create_app
 
 VALID_SECRET = "a-very-strong-and-unique-secret-key-with-at-least-32-chars"
 VALID_PROD_DB = "postgresql+asyncpg://prod_user:StrongProdPass99!@db.internal:5432/taskhub_prod"
+VALID_ADMIN_PASSWORD = "SafeAdminPassword938!"
 
 
 def test_resolve_env_files_by_environment() -> None:
@@ -70,6 +71,34 @@ def test_settings_multi_environment_file_override(
     assert cfg.app_name == "StagingApp"
     assert cfg.cache_ttl_seconds == 120
     assert cfg.jwt_secret_key == VALID_SECRET
+
+
+def test_settings_bootstrap_and_precedence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    for key in ("APP_ENV", "APP_NAME", "CACHE_TTL_SECONDS", "JWT_SECRET_KEY"):
+        monkeypatch.delenv(key, raising=False)
+    (tmp_path / ".env").write_text(
+        f"APP_ENV=staging\nAPP_NAME=BaseApp\nCACHE_TTL_SECONDS=30\nJWT_SECRET_KEY={VALID_SECRET}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".env.staging").write_text(
+        "APP_NAME=EnvironmentApp\nCACHE_TTL_SECONDS=120\n", encoding="utf-8"
+    )
+    (tmp_path / ".env.testing").write_text(
+        "APP_NAME=TestingEnvironmentApp\nCACHE_TTL_SECONDS=90\n", encoding="utf-8"
+    )
+
+    from_env_files = Settings()
+    assert from_env_files.app_env == AppEnvironment.STAGING
+    assert from_env_files.app_name == "EnvironmentApp"
+    assert from_env_files.cache_ttl_seconds == 120
+
+    monkeypatch.setenv("APP_NAME", "OperatingSystemApp")
+    monkeypatch.setenv("APP_ENV", "testing")
+    from_os_environment = Settings()
+    assert from_os_environment.app_env == AppEnvironment.TESTING
+    assert from_os_environment.app_name == "OperatingSystemApp"
+    assert from_os_environment.cache_ttl_seconds == 90
 
 
 def test_settings_fail_fast_invalid_jwt_secret() -> None:
@@ -135,7 +164,7 @@ def test_settings_production_fail_fast_validation() -> None:
         )
 
     # 2. Placeholder JWT_SECRET_KEY is forbidden in production
-    with pytest.raises(ValidationError, match="JWT_SECRET_KEY must not use an example"):
+    with pytest.raises(ValidationError, match="JWT_SECRET_KEY must not contain a placeholder"):
         Settings(
             _env_file=None,
             app_env=AppEnvironment.PRODUCTION,
@@ -145,7 +174,10 @@ def test_settings_production_fail_fast_validation() -> None:
         )
 
     # 3. Default 'changeme' DB password is forbidden in production
-    with pytest.raises(ValidationError, match="DATABASE_URL must not use default 'changeme'"):
+    with pytest.raises(
+        ValidationError,
+        match="DATABASE_URL password must not contain a placeholder",
+    ):
         Settings(
             _env_file=None,
             app_env=AppEnvironment.PRODUCTION,
@@ -162,9 +194,62 @@ def test_settings_production_fail_fast_validation() -> None:
         docs_enabled=False,
         jwt_secret_key=VALID_SECRET,
         database_url=VALID_PROD_DB,
+        seed_admin_password=VALID_ADMIN_PASSWORD,
     )
     assert prod.is_production is True
     assert prod.docs_enabled is False
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("jwt_secret_key", "A-PLACEHOLDER-secret-value-that-is-long-enough-123"),
+        ("jwt_secret_key", "A-DuMmY-secret-value-that-is-long-enough-123456"),
+        ("database_url", "postgresql+asyncpg://u:EXAMPLE-pass@db:5432/app"),
+        ("database_url", "postgresql+asyncpg://u:dummy@db:5432/app"),
+        ("seed_admin_password", "REPLACE_WITH_a_secure_password"),
+        ("seed_admin_password", "changeme-admin-password"),
+    ],
+)
+def test_production_rejects_placeholder_credentials(field: str, value: str) -> None:
+    kwargs: dict[str, object] = {
+        "_env_file": None,
+        "app_env": AppEnvironment.PRODUCTION,
+        "jwt_secret_key": VALID_SECRET,
+        "database_url": VALID_PROD_DB,
+        "seed_admin_password": VALID_ADMIN_PASSWORD,
+    }
+    kwargs[field] = value
+    with pytest.raises(ValidationError) as error:
+        Settings(**kwargs)
+    assert value not in str(error.value)
+
+
+def test_production_requires_seed_admin_password(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("SEED_ADMIN_PASSWORD", raising=False)
+    with pytest.raises(ValidationError, match="SEED_ADMIN_PASSWORD is required"):
+        Settings(
+            _env_file=None,
+            app_env=AppEnvironment.PRODUCTION,
+            jwt_secret_key=VALID_SECRET,
+            database_url=VALID_PROD_DB,
+        )
+
+
+def test_production_example_fails_startup_without_leaking_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("JWT_SECRET_KEY", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("SEED_ADMIN_PASSWORD", raising=False)
+    example_path = Path(__file__).parents[1] / ".env.production.example"
+    with pytest.raises(ValidationError) as error:
+        Settings(_env_file=str(example_path))
+    rendered_error = str(error.value)
+    assert "REPLACE_WITH" not in rendered_error
+    assert "STRONG_PASSWORD" not in rendered_error
+    assert "JWT_SECRET_KEY must not contain a placeholder" in rendered_error
 
 
 async def test_swagger_ui_redoc_and_openapi_documentation(
@@ -227,6 +312,7 @@ async def test_docs_disabled_in_production_mode() -> None:
         docs_enabled=False,
         jwt_secret_key=VALID_SECRET,
         database_url=VALID_PROD_DB,
+        seed_admin_password=VALID_ADMIN_PASSWORD,
     )
     prod_app = create_app(prod_settings)
     transport = ASGITransport(app=prod_app)

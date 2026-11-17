@@ -1,6 +1,35 @@
 class ErrorMessages:
     """Centralized domain and HTTP error messages."""
 
+    # Configuration validation
+    API_PREFIX_MUST_START_WITH_SLASH = "API_V1_PREFIX must start with '/'"
+    DATABASE_URL_UNSUPPORTED_SCHEME = "DATABASE_URL must start with one of"
+    TEST_DATABASE_URL_UNSUPPORTED_SCHEME = (
+        "TEST_DATABASE_URL must start with one of"
+    )
+    REDIS_URL_UNSUPPORTED_SCHEME = "REDIS_URL must start with one of"
+    JWT_ALGORITHM_UNSUPPORTED = "JWT_ALGORITHM must be one of"
+    TEST_DATABASE_URL_MUST_DIFFER = (
+        "TEST_DATABASE_URL must not point to the same database as DATABASE_URL"
+    )
+    PRODUCTION_DEBUG_DISABLED = "DEBUG must be False when APP_ENV is 'production'"
+    PRODUCTION_JWT_SECRET_PLACEHOLDER = (
+        "JWT_SECRET_KEY must not contain a placeholder in production"
+    )
+    PRODUCTION_DATABASE_PASSWORD_PLACEHOLDER = (
+        "DATABASE_URL password must not contain a placeholder in production"
+    )
+    PRODUCTION_SEED_ADMIN_PASSWORD_REQUIRED = (
+        "SEED_ADMIN_PASSWORD is required in production"
+    )
+    PRODUCTION_SEED_ADMIN_PASSWORD_PLACEHOLDER = (
+        "SEED_ADMIN_PASSWORD must not contain a placeholder in production"
+    )
+    PASSWORD_MAX_BYTES = "Password must not exceed {max_bytes} bytes in UTF-8 encoding"
+    PASSWORD_CANNOT_EXCEED_BYTES = "Password cannot exceed {max_bytes} UTF-8 bytes"
+    FIELD_CANNOT_BE_NULL = "{field_name} cannot be null"
+    INVALID_TOKEN_CLAIM_TYPES = "Invalid claim types"
+
     # Authentication (401)
     NOT_AUTHENTICATED = "Not authenticated"
     INVALID_CREDENTIALS = "Invalid email or password"

@@ -1,9 +1,12 @@
 import os
+import re
 from functools import lru_cache
 from typing import Self
 
+from dotenv import dotenv_values
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 from app.core.constants import (
     DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES,
@@ -11,13 +14,17 @@ from app.core.constants import (
     DEFAULT_APP_VERSION,
     DEFAULT_JWT_ALGORITHM,
     DEFAULT_REFRESH_TOKEN_EXPIRE_DAYS,
+    ENV_FILE_NAME,
+    ENV_FILE_PREFIX,
     INSECURE_PLACEHOLDER_SECRETS,
     MIN_SECRET_KEY_LENGTH,
+    PLACEHOLDER_CREDENTIAL_PATTERN,
     SUPPORTED_DB_URL_PREFIXES,
     SUPPORTED_JWT_ALGORITHMS,
     SUPPORTED_REDIS_URL_PREFIXES,
     AppEnvironment,
 )
+from app.core.messages import ErrorMessages
 
 
 def resolve_env_files(app_env: str | None = None) -> tuple[str, ...]:
@@ -27,20 +34,43 @@ def resolve_env_files(app_env: str | None = None) -> tuple[str, ...]:
     1. `.env` (base local defaults)
     2. `.env.<app_env>` (environment-specific overrides, e.g. `.env.testing`)
     """
-    env_name = (app_env or os.getenv("APP_ENV") or AppEnvironment.DEVELOPMENT.value).strip().lower()
-    return (".env", f".env.{env_name}")
+    base_values = dotenv_values(ENV_FILE_NAME)
+    env_name = (
+        app_env
+        or os.getenv("APP_ENV")
+        or base_values.get("APP_ENV")
+        or AppEnvironment.DEVELOPMENT.value
+    )
+    env_name = str(env_name).strip().lower()
+    return (ENV_FILE_NAME, f"{ENV_FILE_PREFIX}{env_name}")
+
+
+def _contains_placeholder(value: str | None) -> bool:
+    return bool(value and re.search(PLACEHOLDER_CREDENTIAL_PATTERN, value, re.IGNORECASE))
 
 
 class Settings(BaseSettings):
     """Application configuration with multi-environment loading and fail-fast validation."""
 
     model_config = SettingsConfigDict(
-        env_file=resolve_env_files(),
+        env_file=None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         populate_by_name=True,
         extra="ignore",
+        hide_input_in_errors=True,
     )
+
+    def __init__(self, **values: object) -> None:
+        if "_env_file" not in values:
+            base_values = dotenv_values(ENV_FILE_NAME)
+            bootstrap_env = (
+                os.getenv("APP_ENV")
+                or base_values.get("APP_ENV")
+                or AppEnvironment.DEVELOPMENT.value
+            )
+            values["_env_file"] = resolve_env_files(str(bootstrap_env))
+        super().__init__(**values)
 
     app_env: AppEnvironment = Field(
         default=AppEnvironment.DEVELOPMENT,
@@ -138,7 +168,7 @@ class Settings(BaseSettings):
     def validate_api_prefix(cls, value: str) -> str:
         cleaned = value.strip()
         if not cleaned.startswith("/"):
-            raise ValueError("API_V1_PREFIX must start with '/'")
+            raise ValueError(ErrorMessages.API_PREFIX_MUST_START_WITH_SLASH)
         return cleaned.rstrip("/") or "/"
 
     @field_validator("database_url")
@@ -147,7 +177,7 @@ class Settings(BaseSettings):
         cleaned = value.strip()
         if not cleaned.startswith(SUPPORTED_DB_URL_PREFIXES):
             allowed = ", ".join(SUPPORTED_DB_URL_PREFIXES)
-            raise ValueError(f"DATABASE_URL must start with one of: {allowed}")
+            raise ValueError(f"{ErrorMessages.DATABASE_URL_UNSUPPORTED_SCHEME}: {allowed}")
         return cleaned
 
     @field_validator("test_database_url")
@@ -160,7 +190,9 @@ class Settings(BaseSettings):
             return None
         if not cleaned.startswith(SUPPORTED_DB_URL_PREFIXES):
             allowed = ", ".join(SUPPORTED_DB_URL_PREFIXES)
-            raise ValueError(f"TEST_DATABASE_URL must start with one of: {allowed}")
+            raise ValueError(
+                f"{ErrorMessages.TEST_DATABASE_URL_UNSUPPORTED_SCHEME}: {allowed}"
+            )
         return cleaned
 
     @field_validator("redis_url")
@@ -169,7 +201,7 @@ class Settings(BaseSettings):
         cleaned = value.strip()
         if not cleaned.startswith(SUPPORTED_REDIS_URL_PREFIXES):
             allowed = ", ".join(SUPPORTED_REDIS_URL_PREFIXES)
-            raise ValueError(f"REDIS_URL must start with one of: {allowed}")
+            raise ValueError(f"{ErrorMessages.REDIS_URL_UNSUPPORTED_SCHEME}: {allowed}")
         return cleaned
 
     @field_validator("jwt_algorithm")
@@ -178,27 +210,29 @@ class Settings(BaseSettings):
         cleaned = value.strip().upper()
         if cleaned not in SUPPORTED_JWT_ALGORITHMS:
             allowed = ", ".join(sorted(SUPPORTED_JWT_ALGORITHMS))
-            raise ValueError(f"JWT_ALGORITHM must be one of: {allowed}")
+            raise ValueError(f"{ErrorMessages.JWT_ALGORITHM_UNSUPPORTED}: {allowed}")
         return cleaned
 
     @model_validator(mode="after")
     def validate_environment_constraints(self) -> Self:
         if self.test_database_url and self.test_database_url == self.database_url:
-            raise ValueError(
-                "TEST_DATABASE_URL must not point to the same database as DATABASE_URL"
-            )
+            raise ValueError(ErrorMessages.TEST_DATABASE_URL_MUST_DIFFER)
 
         if self.is_production:
             if self.debug:
-                raise ValueError("DEBUG must be False when APP_ENV is 'production'")
-            if self.jwt_secret_key in INSECURE_PLACEHOLDER_SECRETS:
-                raise ValueError(
-                    "JWT_SECRET_KEY must not use an example placeholder value in production"
-                )
-            if ":changeme@" in self.database_url:
-                raise ValueError(
-                    "DATABASE_URL must not use default 'changeme' credentials in production"
-                )
+                raise ValueError(ErrorMessages.PRODUCTION_DEBUG_DISABLED)
+            if (
+                self.jwt_secret_key in INSECURE_PLACEHOLDER_SECRETS
+                or _contains_placeholder(self.jwt_secret_key)
+            ):
+                raise ValueError(ErrorMessages.PRODUCTION_JWT_SECRET_PLACEHOLDER)
+            database_password = make_url(self.database_url).password
+            if _contains_placeholder(database_password):
+                raise ValueError(ErrorMessages.PRODUCTION_DATABASE_PASSWORD_PLACEHOLDER)
+            if not self.seed_admin_password:
+                raise ValueError(ErrorMessages.PRODUCTION_SEED_ADMIN_PASSWORD_REQUIRED)
+            if _contains_placeholder(self.seed_admin_password):
+                raise ValueError(ErrorMessages.PRODUCTION_SEED_ADMIN_PASSWORD_PLACEHOLDER)
 
         return self
 
