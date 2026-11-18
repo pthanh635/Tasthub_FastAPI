@@ -141,7 +141,10 @@ class RedisCacheMiddleware(BaseHTTPMiddleware):
             response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
             return response
 
-        body_iterator = response.body_iterator
+        body_iterator = getattr(response, "body_iterator", None)
+        if body_iterator is None:
+            response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
+            return response
         if not any(name.lower() == b"content-length" for name, _ in response.raw_headers):
             streamed = StreamingResponse(body_iterator, status_code=response.status_code)
             streamed.raw_headers = self._headers_with_cache_status(

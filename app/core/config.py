@@ -1,7 +1,7 @@
 import os
 import re
 from functools import lru_cache
-from typing import Self
+from typing import Any, Self
 
 from dotenv import dotenv_values
 from pydantic import Field, field_validator, model_validator
@@ -61,7 +61,7 @@ class Settings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    def __init__(self, **values: object) -> None:
+    def __init__(self, **values: Any) -> None:
         if "_env_file" not in values:
             base_values = dotenv_values(ENV_FILE_NAME)
             bootstrap_env = (
