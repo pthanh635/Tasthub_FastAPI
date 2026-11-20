@@ -119,6 +119,14 @@ class Settings(BaseSettings):
         default=DEFAULT_CACHE_PUBLIC_PATHS,
         validation_alias="CACHE_PUBLIC_PATHS",
     )
+    log_level: str = Field(
+        default="INFO",
+        validation_alias="LOG_LEVEL",
+    )
+    log_json_format: bool = Field(
+        default=True,
+        validation_alias="LOG_JSON_FORMAT",
+    )
     test_database_url: str | None = Field(
         default=None,
         validation_alias="TEST_DATABASE_URL",

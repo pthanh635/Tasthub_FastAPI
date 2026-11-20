@@ -1,200 +1,165 @@
-# TaskHub API — Day 3: Authentication, Security, Authorization & RBAC
+# TaskHub API
 
-Hệ thống quản lý công việc (**Task Management API**) xây dựng bằng **FastAPI**, **SQLAlchemy 2.x Async ORM**, **PostgreSQL (`asyncpg`)**, **Alembic**, **JWT (`PyJWT`)**, **Bcrypt** và **Pydantic v2** theo kiến trúc **Layered Architecture + Repository Pattern + Dependency Injection**.
-
----
-
-## 1. Tech Stack
-
-- **Python**: 3.11+
-- **Web Framework**: FastAPI (`>=0.115`)
-- **Validation & Settings**: Pydantic v2, `pydantic-settings`
-- **ORM & Database**: SQLAlchemy 2.x (Async ORM), PostgreSQL (`asyncpg`)
-- **Database Migration**: Alembic (async template)
-- **Caching**: Redis async client with graceful fallback when Redis is unavailable
-- **Authentication & Security**: `bcrypt` (password hashing), `PyJWT` (`HS256` Access & Refresh Tokens, Token Rotation & Revocation)
-- **Testing**: `pytest`, `pytest-asyncio`, `httpx` (chạy trên database PostgreSQL test riêng biệt `taskhub_test`)
-- **Code Quality**: `ruff`, `mypy` (strict mode)
+TaskHub is a production-ready, multi-tenant Task & Project Management REST API built with **FastAPI**, **SQLAlchemy 2.x (Async ORM)**, **PostgreSQL (`asyncpg`)**, **Redis**, and **Pydantic v2**.
 
 ---
 
-## 2. Cây thư mục thực tế
+## 🚀 Features
+
+- **Architecture & Design**: Clean Layered Architecture (`Routers -> Services -> Repositories -> Models/Schemas`) with explicit Dependency Injection.
+- **Authentication & Security**:
+  - JWT Authentication (Access + Refresh token rotation).
+  - Reuse detection for refresh tokens: atomically revokes all active sessions if a revoked token is used.
+  - Role-Based Access Control (RBAC):
+    - **Global Roles**: `ADMIN`, `MEMBER`.
+    - **Workspace Roles**: `OWNER`, `ADMIN`, `EDITOR`, `VIEWER`.
+- **Database & Migrations**:
+  - Fully asynchronous database operations with `asyncpg` and SQLAlchemy 2.0 async sessions.
+  - Database schema versioning with Alembic migrations.
+- **High Performance Caching**:
+  - Redis cache layer with automatic cache invalidation on write mutations.
+  - Path-scoped cache for public endpoints with `X-Cache` diagnostic headers (`HIT`, `MISS`, `BYPASS`).
+  - Automatic reconnection backoff and socket timeouts preventing API blocking.
+- **Structured Logging & Diagnostics**:
+  - Request tracing headers (`X-Request-ID`, `X-Process-Time-Ms`).
+  - Container/Cloud-ready structured JSON logging format with UTC timestamps.
+- **Background Tasks & Queue**:
+  - Asynchronous background task runner with graceful shutdown support.
+  - Background email notifications and audit event logging.
+- **Containerization**:
+  - Multi-stage Docker build for minimal image size and secure non-root execution (`appuser:1001`).
+  - Docker Compose setup orchestrating API, PostgreSQL, and Redis.
+- **Interactive Documentation**:
+  - OpenAPI 3.1 schema, Swagger UI (`/docs`), and ReDoc (`/redoc`) with toggleable `DOCS_ENABLED`.
+
+---
+
+## 📂 Project Structure
 
 ```text
 taskhub/
-├── alembic/
-│   ├── versions/
-│   │   ├── 0001_initial_schema.py
-│   │   ├── 0002_auth_and_rbac.py
-│   │   └── 0003_cascade_and_indexes.py
-│   ├── env.py
-│   ├── README
-│   └── script.py.mako
+├── alembic/                      # Database migration scripts
+│   └── versions/                 # Migration revision files
 ├── app/
-│   ├── api/
+│   ├── api/                      # API presentation layer
 │   │   └── v1/
-│   │       ├── routers/
-│   │       │   ├── auth.py
-│   │       │   ├── projects.py
-│   │       │   ├── tasks.py
-│   │       │   ├── users.py
-│   │       │   └── workspaces.py
-│   │       └── dependencies.py
-│   ├── core/
-│   │   ├── config.py
-│   │   ├── database.py
-│   │   ├── exceptions.py
-│   │   ├── security.py
-│   │   └── seed.py
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── base.py
-│   │   ├── comment.py
-│   │   ├── enums.py
-│   │   ├── label.py
-│   │   ├── project.py
-│   │   ├── refresh_token.py
-│   │   ├── task.py
-│   │   ├── user.py
-│   │   └── workspace.py
-│   ├── repositories/
-│   │   ├── __init__.py
-│   │   ├── base.py
-│   │   ├── project_repository.py
-│   │   ├── refresh_token_repository.py
-│   │   ├── task_repository.py
-│   │   ├── user_repository.py
-│   │   └── workspace_repository.py
-│   ├── schemas/
-│   │   ├── __init__.py
-│   │   ├── auth.py
-│   │   ├── project.py
-│   │   ├── task.py
-│   │   ├── user.py
-│   │   └── workspace.py
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── auth_service.py
-│   │   ├── task_service.py
-│   │   ├── user_service.py
-│   │   └── workspace_service.py
-│   └── main.py
-├── tests/
-│   ├── conftest.py
-│   ├── test_auth_and_users.py
-│   ├── test_database_and_models.py
-│   ├── test_rbac_and_ownership.py
-│   ├── test_repository_and_service.py
-│   └── test_tasks.py
-├── .env.example
-├── .gitignore
-├── alembic.ini
-├── pyproject.toml
-├── README.md
-└── requirements.txt
+│   │       ├── dependencies.py   # FastAPI dependency injections
+│   │       └── routers/          # Endpoints: auth, users, workspaces, projects, tasks
+│   ├── core/                     # Application configurations & foundational components
+│   │   ├── cache.py              # Redis cache adapter
+│   │   ├── config.py             # Pydantic Settings & multi-env loader
+│   │   ├── constants.py          # Enums, defaults, and system constants
+│   │   ├── database.py           # Async SQLAlchemy engine & session factory
+│   │   ├── exceptions.py         # Custom domain exceptions
+│   │   ├── logging.py            # Structured JSON formatter and setup
+│   │   ├── messages.py           # Centralized domain and error messages
+│   │   ├── middleware.py         # Request context and Redis cache middleware
+│   │   ├── openapi.py            # OpenAPI metadata and Swagger configuration
+│   │   ├── policies.py           # RBAC permission matrix
+│   │   ├── security.py           # Password hashing (bcrypt) & JWT utilities
+│   │   └── tasks.py              # Background task queue & worker jobs
+│   ├── models/                   # SQLAlchemy declarative ORM models
+│   ├── repositories/             # Data access repository layer
+│   ├── schemas/                  # Pydantic data validation schemas
+│   ├── services/                 # Business logic service layer
+│   └── main.py                   # FastAPI application factory & lifespan
+├── tests/                        # Automated test suite (67 test cases)
+├── Dockerfile                    # Multi-stage container build definition
+├── docker-compose.yml            # Local development orchestration (App + DB + Redis)
+├── requirements.txt              # Production and development dependencies
+├── pyproject.toml                # Project configurations (Ruff, Mypy)
+└── pytest.ini                    # Pytest test discovery & execution settings
 ```
 
 ---
 
-## 3. Kiến trúc Authentication, RBAC & Resource Ownership
+## 🛠️ Quick Start
 
-### 3.1. Authentication & Token Lifecycle
-- **Password Hashing**: Mật khẩu người dùng được băm bằng `bcrypt` (`hash_password()`, `verify_password()`), tuyệt đối không lưu hoặc trả về plaintext/hash trong API response (`UserResponse`).
-- **JWT Access & Refresh Tokens**:
-  - **Access Token**: Thời hạn ngắn (`ACCESS_TOKEN_EXPIRE_MINUTES=30`), chứa `sub` (`user.id`), `role` (`ADMIN|MEMBER`), `type="access"`, `jti`, `iat`, `exp`.
-  - **Refresh Token**: Thời hạn dài (`REFRESH_TOKEN_EXPIRE_DAYS=7`), chứa `sub`, `type="refresh"`, `jti`. Bản băm SHA-256 (`token_hash`) được lưu trong bảng `refresh_tokens`.
-  - **Token Rotation & Revocation**: Khi gọi `POST /api/v1/auth/refresh`, refresh token cũ bị thu hồi (`revoked_at`) và cặp token mới được cấp phát. Khi gọi `POST /api/v1/auth/logout` hoặc đổi mật khẩu (`POST /api/v1/users/me/change-password`), refresh token bị thu hồi ngay lập tức.
+### Option 1: Run with Docker Compose (Recommended)
 
-### 3.2. Authorization, RBAC & Resource Ownership
-- **Dependency `get_current_user`**: Xác thực Bearer JWT Access Token qua `HTTPBearer` (tích hợp nút `Authorize` trên Swagger UI), kiểm tra trạng thái `user.is_active`.
-- **Global RBAC (`UserRole`)**: `ADMIN` và `MEMBER` (hỗ trợ dependency `require_global_roles(...)`).
-- **Workspace RBAC (`WorkspaceRole`) & Resource Ownership**:
-  - `OWNER`: Toàn quyền trên Workspace (chỉ `OWNER` hoặc global `ADMIN` mới được sửa/xóa Workspace; không thể bị xóa khỏi Workspace).
-  - `ADMIN`: Quản lý thành viên (`POST / DELETE /workspaces/{id}/members`), quản lý Project và toàn bộ Task trong Workspace.
-  - `EDITOR`: Tạo/cập nhật Project và Task. **Resource Ownership**: Khi xóa Task (`DELETE /api/v1/tasks/{id}`), `EDITOR` chỉ được xóa Task do chính mình tạo (`task.created_by_id == current_user.id`); không được xóa Task của người khác.
-  - `VIEWER`: Chỉ có quyền xem (`GET`) thông tin Workspace, Project và Task; mọi thao tác ghi (`POST`, `PUT`, `PATCH`, `DELETE`) đều bị từ chối với `403 Forbidden`.
+1. **Clone repository and setup environment variables:**
+   ```bash
+   cp .env.example .env
+   ```
 
----
+2. **Start all services (App, PostgreSQL, Redis):**
+   ```bash
+   docker compose up --build -d
+   ```
 
-## 4. API Endpoints (Day 3)
+3. **Check logs and status:**
+   ```bash
+   docker compose logs -f app
+   ```
 
-### Auth & Users
-| Method | Endpoint | Status | Mô tả |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/auth/register` | `201` / `409` | Đăng ký tài khoản mới |
-| `POST` | `/api/v1/auth/login` | `200` / `401` | Đăng nhập nhận `access_token` & `refresh_token` |
-| `POST` | `/api/v1/auth/refresh` | `200` / `401` | Làm mới và xoay vòng (rotate) cặp JWT token |
-| `POST` | `/api/v1/auth/logout` | `204` / `401` | Thu hồi (revoke) refresh token hiện tại |
-| `GET` | `/api/v1/users/me` | `200` / `401` | Xem thông tin hồ sơ người dùng hiện tại |
-| `PATCH` | `/api/v1/users/me` | `200` / `401` | Cập nhật `full_name` của người dùng hiện tại |
-| `POST` | `/api/v1/users/me/change-password` | `204` / `400` | Đổi mật khẩu và thu hồi toàn bộ refresh token cũ |
-
-### Workspaces, Projects & Tasks (Yêu cầu Bearer Token)
-| Method | Endpoint | Quyền yêu cầu | Mô tả |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/api/v1/workspaces` | Authenticated | Tạo workspace mới (người tạo thành `OWNER`) |
-| `GET` | `/api/v1/workspaces` | Authenticated | Danh sách workspace mà user là thành viên |
-| `GET` | `/api/v1/workspaces/{id}` | Member (`ALL`) | Chi tiết workspace |
-| `PATCH` | `/api/v1/workspaces/{id}` | `OWNER` only | Cập nhật thông tin workspace |
-| `DELETE` | `/api/v1/workspaces/{id}` | `OWNER` only | Xóa workspace |
-| `GET` | `/api/v1/workspaces/{id}/members` | Member (`ALL`) | Danh sách thành viên trong workspace |
-| `POST` | `/api/v1/workspaces/{id}/members` | `OWNER` / `ADMIN` | Mời thành viên hoặc cập nhật role |
-| `DELETE` | `/api/v1/workspaces/{id}/members/{user_id}` | `OWNER` / `ADMIN` | Xóa thành viên khỏi workspace |
-| `POST` | `/api/v1/workspaces/{id}/projects` | `OWNER` / `ADMIN` / `EDITOR` | Tạo project trong workspace |
-| `GET` | `/api/v1/workspaces/{id}/projects` | Member (`ALL`) | Danh sách project trong workspace |
-| `GET` | `/api/v1/projects/{id}` | Member (`ALL`) | Xem chi tiết project |
-| `PATCH` | `/api/v1/projects/{id}` | `OWNER` / `ADMIN` / `EDITOR` | Cập nhật hoặc Archive project (`status=ARCHIVED`) |
-| `GET` | `/api/v1/projects/{id}/tasks` | Member (`ALL`) | Danh sách task thuộc project |
-| `POST` | `/api/v1/projects/{id}/tasks` | `OWNER` / `ADMIN` / `EDITOR` | Tạo task trong project (`created_by_id = current_user.id`) |
-| `POST` | `/api/v1/tasks` | `OWNER` / `ADMIN` / `EDITOR` | Tạo task mới |
-| `GET` | `/api/v1/tasks` | Member (`ALL`) | Danh sách task trong các workspace mà user tham gia |
-| `GET` | `/api/v1/tasks/{id}` | Member (`ALL`) | Chi tiết task theo UUID |
-| `PUT` | `/api/v1/tasks/{id}` | `OWNER` / `ADMIN` / `EDITOR` | Cập nhật toàn bộ trường chỉnh sửa của task |
-| `PATCH` | `/api/v1/tasks/{id}` | `OWNER` / `ADMIN` / `EDITOR` | Cập nhật một phần (partial update) task |
-| `DELETE` | `/api/v1/tasks/{id}` | Task Creator (`EDITOR`) / `OWNER` / `ADMIN` | Xóa task (kiểm tra Resource Ownership) |
+4. Access the API documentation at: [http://localhost:8000/docs](http://localhost:8000/docs)
 
 ---
 
-## 5. Multi-Environment Configuration & API Documentation (Day 5)
+### Option 2: Local Development Setup
 
-### 5.1. Multi-Environment `pydantic-settings` & Fail-Fast Validation
-- **Environment Modes (`APP_ENV`)**: Hỗ trợ `development`, `testing`, `staging`, `production` (mặc định: `development`).
-- **Layered `.env` Loading**: Tự động nạp file cấu hình theo thứ tự ưu tiên: `.env` -> `.env.<APP_ENV>` -> biến môi trường hệ điều hành.
-- **Fail-Fast Validation**:
-  - Kiểm tra định dạng `DATABASE_URL` (`postgresql+asyncpg://`), `REDIS_URL` (`redis://` / `rediss://`), `JWT_ALGORITHM` (`HS256`/`HS384`/`HS512`) và `JWT_SECRET_KEY` (tối thiểu 32 ký tự).
-  - Ngăn chặn `TEST_DATABASE_URL` trùng với `DATABASE_URL`.
-  - Chế độ `production` tự động từ chối khởi động nếu `DEBUG=true`, dùng `JWT_SECRET_KEY` mẫu, hoặc dùng mật khẩu DB mặc định `changeme`.
+1. **Prerequisites:**
+   - Python 3.11+
+   - PostgreSQL running on port `5432`
+   - Redis running on port `6379`
 
-### 5.2. OpenAPI Documentation (Swagger UI & ReDoc)
-- **Swagger UI**: `/docs` (hỗ trợ `persistAuthorization`, `displayRequestDuration`, `filter`).
-- **ReDoc**: `/redoc`.
-- **OpenAPI Schema**: `/openapi.json` (tích hợp `BearerAuth` security scheme, mô tả tags và tài liệu hóa đầy đủ các response lỗi `400`, `401`, `403`, `404`, `409`, `500` qua `ErrorResponse` & `InternalErrorResponse`).
-- Có thể bật/tắt tài liệu API qua biến môi trường `DOCS_ENABLED=true|false`.
+2. **Create virtual environment and install dependencies:**
+   ```bash
+   python -m venv .venv
+   # Windows:
+   .venv\Scripts\activate
+   # Linux/macOS:
+   source .venv/bin/activate
+
+   pip install -r requirements.txt
+   ```
+
+3. **Configure environment:**
+   Create a `.env` file based on `.env.example`:
+   ```bash
+   cp .env.example .env
+   ```
+
+4. **Run database migrations:**
+   ```bash
+   alembic upgrade head
+   ```
+
+5. **Start development server:**
+   ```bash
+   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   ```
 
 ---
 
-## 6. Hướng dẫn chạy Migrations, Server & Tests
+## 🧪 Testing & Code Quality
 
-
-Redis cache mặc định dùng `redis://localhost:6379/0`. Có thể cấu hình qua
-`REDIS_URL` và `CACHE_TTL_SECONDS`. Nếu Redis chưa chạy, API vẫn khởi động và
-các response sẽ được đánh dấu `X-Cache: BYPASS`.
+Run tests, type checks, and linters:
 
 ```bash
-# 1. Kích hoạt môi trường ảo
-.\.venv\Scripts\activate
-
-# 2. Chạy toàn bộ Alembic migration lên head
-alembic upgrade head
-
-# 3. Seed dữ liệu mẫu (giá trị lấy từ SEED_ADMIN_EMAIL và SEED_ADMIN_PASSWORD)
-python -m app.core.seed
-
-# 4. Khởi động API server
-uvicorn app.main:app --reload
-
-# 5. Chạy kiểm thử và kiểm tra chất lượng code
+# Run full pytest test suite (67 test cases)
 python -m pytest -v
-ruff check .
-mypy .
+
+# Run code style and linting checks
+python -m ruff check .
+
+# Run static type checking
+python -m mypy app
 ```
+
+---
+
+## ⚙️ Environment Configuration
+
+| Variable | Description | Default |
+|---|---|---|
+| `APP_ENV` | Application environment (`development`, `testing`, `staging`, `production`) | `development` |
+| `APP_NAME` | Name displayed in OpenAPI documentation | `TaskHub API` |
+| `DOCS_ENABLED` | Enable or disable Swagger UI & ReDoc | `true` |
+| `DATABASE_URL` | PostgreSQL async connection string | `postgresql+asyncpg://...` |
+| `REDIS_URL` | Redis server connection string | `redis://localhost:6379/0` |
+| `CACHE_TTL_SECONDS` | Cache expiration time in seconds | `30` |
+| `CACHE_PUBLIC_PATHS`| Comma-separated list of public routes enabled for caching | `/api/v1/workspaces, ...` |
+| `JWT_SECRET_KEY` | Secret key for signing JWT tokens (min 32 chars) | Required |
+| `LOG_LEVEL` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) | `INFO` |
+| `LOG_JSON_FORMAT` | Enable structured JSON logging format | `true` |
