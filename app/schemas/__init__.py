@@ -12,7 +12,12 @@ from app.schemas.auth import (
     RegisterRequest,
     TokenResponse,
 )
-from app.schemas.base import BaseSchema
+from app.schemas.base import (
+    BaseSchema,
+    ErrorResponse,
+    HealthCheckResponse,
+    InternalErrorResponse,
+)
 from app.schemas.project import ProjectCreate, ProjectResponse, ProjectUpdate
 from app.schemas.task import (
     ProjectTaskCreate,
@@ -41,6 +46,9 @@ __all__ = [
     "AdminUserUpdate",
     "BaseSchema",
     "ChangePasswordRequest",
+    "ErrorResponse",
+    "HealthCheckResponse",
+    "InternalErrorResponse",
     "LoginRequest",
     "LogoutRequest",
     "ProjectCreate",

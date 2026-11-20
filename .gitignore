@@ -4,6 +4,12 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 .env
+.env.*
+!.env.example
+!.env.*.example
+.vscode/settings.json
+reconcile_alembic_after_rebase.py
 *.pyc
 *.db
 *.sqlite3
+

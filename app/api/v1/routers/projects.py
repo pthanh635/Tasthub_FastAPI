@@ -9,6 +9,7 @@ from app.api.v1.dependencies import (
     WorkspaceServiceDep,
 )
 from app.core.constants import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT
+from app.core.openapi import error_responses
 from app.schemas.project import ProjectResponse, ProjectUpdate
 from app.schemas.task import (
     ProjectTaskCreate,
@@ -24,12 +25,8 @@ router = APIRouter(prefix="/projects", tags=["Projects"])
     response_model=ProjectResponse,
     status_code=status.HTTP_200_OK,
     summary="Get project by UUID",
-    responses={
-        200: {"description": "Project retrieved successfully"},
-        401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient workspace permissions"},
-        404: {"description": "Project not found"},
-    },
+    description="Retrieve project details by UUID. Requires membership in the parent workspace.",
+    responses=error_responses(401, 403, 404),
 )
 async def get_project(
     project_id: UUID,
@@ -44,13 +41,11 @@ async def get_project(
     response_model=ProjectResponse,
     status_code=status.HTTP_200_OK,
     summary="Update or archive project (OWNER/ADMIN/EDITOR only)",
-    responses={
-        200: {"description": "Project updated successfully"},
-        401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient workspace permissions"},
-        404: {"description": "Project not found"},
-        422: {"description": "Validation error"},
-    },
+    description=(
+        "Update project metadata (`name`, `description`) or transition its lifecycle `status` "
+        "(`ACTIVE` / `ARCHIVED`). Requires `OWNER`, `ADMIN`, or `EDITOR` role in the workspace."
+    ),
+    responses=error_responses(401, 403, 404),
 )
 async def update_project(
     project_id: UUID,
@@ -70,19 +65,21 @@ async def update_project(
     response_model=TaskListResponse,
     status_code=status.HTTP_200_OK,
     summary="List tasks in a project",
-    responses={
-        200: {"description": "Paginated list of tasks in project"},
-        401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient workspace permissions"},
-        404: {"description": "Project not found"},
-    },
+    description=(
+        "Paginated list of tasks within the specified project. "
+        "Cached via Redis when available."
+    ),
+    responses=error_responses(401, 403, 404),
 )
 async def list_project_tasks(
     project_id: UUID,
     current_user: CurrentUserDep,
     service: TaskServiceDep,
-    offset: Annotated[int, Query(ge=0)] = 0,
-    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_LIMIT)] = DEFAULT_PAGE_LIMIT,
+    offset: Annotated[int, Query(ge=0, description="Number of tasks to skip")] = 0,
+    limit: Annotated[
+        int,
+        Query(ge=1, le=MAX_PAGE_LIMIT, description="Maximum tasks to return"),
+    ] = DEFAULT_PAGE_LIMIT,
 ) -> TaskListResponse:
     return await service.list_all(
         current_user=current_user,
@@ -97,14 +94,11 @@ async def list_project_tasks(
     response_model=TaskResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a task in a project (OWNER/ADMIN/EDITOR only)",
-    responses={
-        201: {"description": "Task created in project"},
-        400: {"description": "Bad Request or project archived"},
-        401: {"description": "Not authenticated"},
-        403: {"description": "Insufficient workspace permissions"},
-        404: {"description": "Project or assignee not found"},
-        422: {"description": "Validation error"},
-    },
+    description=(
+        "Create a new task inside an `ACTIVE` project. Rejects creation if the "
+        "project is `ARCHIVED` or if `assignee_id` is not a workspace member."
+    ),
+    responses=error_responses(400, 401, 403, 404),
 )
 async def create_project_task(
     project_id: UUID,
@@ -117,3 +111,4 @@ async def create_project_task(
         data,
         current_user=current_user,
     )
+

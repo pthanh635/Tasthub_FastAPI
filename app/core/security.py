@@ -30,7 +30,11 @@ def hash_password(plain_password: str) -> str:
     """Hash a plaintext password using bcrypt (enforcing <= 72 UTF-8 bytes)."""
     password_bytes = plain_password.encode("utf-8")
     if len(password_bytes) > PASSWORD_MAX_BYTES:
-        raise ValueError(f"Password cannot exceed {PASSWORD_MAX_BYTES} UTF-8 bytes")
+        raise ValueError(
+            ErrorMessages.PASSWORD_CANNOT_EXCEED_BYTES.format(
+                max_bytes=PASSWORD_MAX_BYTES
+            )
+        )
     salt = bcrypt.gensalt()
     hashed = bcrypt.hashpw(password_bytes, salt)
     return hashed.decode("utf-8")
@@ -139,7 +143,7 @@ def decode_token(token: str, *, expected_type: TokenType) -> TokenPayload:
             or not isinstance(raw_jti, str)
             or not isinstance(raw_exp, int | float)
         ):
-            raise ValueError("Invalid claim types")
+            raise ValueError(ErrorMessages.INVALID_TOKEN_CLAIM_TYPES)
         subject_uuid = UUID(raw_sub)
         jti_uuid = UUID(raw_jti)
         expires_at = datetime.fromtimestamp(raw_exp, tz=UTC)
