@@ -14,6 +14,7 @@ from app.core.security import (
     hash_token,
     verify_password,
 )
+from app.core.tasks import background_queue, log_audit_event, send_email_notification
 from app.models.enums import UserRole
 from app.models.user import User
 from app.repositories.refresh_token_repository import RefreshTokenRepository
@@ -45,6 +46,19 @@ class AuthService:
             }
         )
         await self._user_repo.commit()
+        background_queue.enqueue(
+            send_email_notification,
+            normalized_email,
+            "Welcome to TaskHub!",
+            f"Hello {user.full_name}, your account has been successfully created.",
+        )
+        background_queue.enqueue(
+            log_audit_event,
+            "USER_REGISTERED",
+            user_id=user.id,
+            resource="users",
+            details={"email": normalized_email},
+        )
         return UserResponse.model_validate(user)
 
     async def login(self, email: str, password: str) -> TokenResponse:

@@ -10,6 +10,7 @@ from app.core.cache import RedisCache
 from app.core.config import Settings, settings
 from app.core.database import engine
 from app.core.exceptions import AppException
+from app.core.logging import setup_logging
 from app.core.middleware import RedisCacheMiddleware, RequestContextMiddleware
 from app.core.openapi import (
     GLOBAL_ERROR_RESPONSES,
@@ -19,6 +20,7 @@ from app.core.openapi import (
     OPENAPI_TAGS,
     SWAGGER_UI_PARAMETERS,
 )
+from app.core.tasks import background_queue
 from app.schemas.base import HealthCheckResponse
 
 cache = RedisCache(settings.redis_url, ttl_seconds=settings.cache_ttl_seconds)
@@ -26,9 +28,15 @@ cache = RedisCache(settings.redis_url, ttl_seconds=settings.cache_ttl_seconds)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    setup_logging(
+        level=settings.log_level,
+        json_format=settings.log_json_format,
+    )
     await cache.connect()
     _app.state.cache = cache
+    _app.state.background_queue = background_queue
     yield
+    await background_queue.wait_all(timeout_seconds=3.0)
     await cache.close()
     await engine.dispose()
 
