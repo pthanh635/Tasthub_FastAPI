@@ -54,7 +54,11 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
         lifespan=lifespan,
     )
 
-    application.add_middleware(RedisCacheMiddleware, cache=cache)
+    application.add_middleware(
+        RedisCacheMiddleware,
+        cache=cache,
+        public_get_paths=frozenset(app_settings.cache_public_paths),
+    )
     application.add_middleware(RequestContextMiddleware)
 
     @application.exception_handler(AppException)

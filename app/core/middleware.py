@@ -86,6 +86,16 @@ class RedisCacheMiddleware(BaseHTTPMiddleware):
             or path.endswith("/auth")
             or "/auth/" in path
         )
+
+        # Handle write operations (POST, PUT, PATCH, DELETE, etc.) first
+        if request.method not in CACHEABLE_METHODS:
+            response = await call_next(request)
+            if not is_auth_path and response.status_code < HTTP_ERROR_STATUS_THRESHOLD:
+                await self._cache.increment_version()
+            response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
+            return response
+
+        # Non-cacheable endpoints or authenticated requests bypass cache
         has_authentication = (
             AUTHORIZATION_HEADER in request.headers or "cookie" in request.headers
         )
@@ -96,13 +106,6 @@ class RedisCacheMiddleware(BaseHTTPMiddleware):
             or has_authentication
         ):
             response = await call_next(request)
-            response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
-            return response
-
-        if request.method not in CACHEABLE_METHODS:
-            response = await call_next(request)
-            if response.status_code < HTTP_ERROR_STATUS_THRESHOLD:
-                await self._cache.increment_version()
             response.headers[CACHE_STATUS_HEADER] = CacheStatus.BYPASS
             return response
 
@@ -235,11 +238,6 @@ class RedisCacheMiddleware(BaseHTTPMiddleware):
         return response
 
     async def _cache_key(self, request: Request) -> str:
-        auth = request.headers.get("Authorization", "")
-        auth_fingerprint = hashlib.sha256(auth.encode()).hexdigest()
         version = await self._cache.get_version()
-        raw_key = (
-            f"{version}:{request.method}:{request.url.path}?"
-            f"{request.url.query}:{auth_fingerprint}"
-        )
+        raw_key = f"{version}:{request.method}:{request.url.path}?{request.url.query}"
         return f"{REDIS_CACHE_KEY_PREFIX}{hashlib.sha256(raw_key.encode()).hexdigest()}"

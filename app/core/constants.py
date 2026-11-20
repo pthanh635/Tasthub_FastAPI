@@ -53,6 +53,11 @@ HTTP_OK_STATUS: int = 200
 HTTP_ERROR_STATUS_THRESHOLD: int = 400
 REQUEST_ID_MAX_LENGTH: int = 64
 CACHEABLE_METHODS: frozenset[str] = frozenset({"GET", "HEAD"})
+DEFAULT_CACHE_PUBLIC_PATHS: tuple[str, ...] = (
+    "/api/v1/workspaces",
+    "/api/v1/projects",
+    "/api/v1/tasks",
+)
 DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 DEFAULT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 TOKEN_HASH_LENGTH: int = 64

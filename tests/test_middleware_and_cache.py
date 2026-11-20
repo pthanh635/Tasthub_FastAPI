@@ -428,3 +428,58 @@ async def test_unavailable_redis_bypasses_cache_and_returns_api_response(
     assert response.status_code == 200
     assert response.headers["X-Cache"] == "BYPASS"
     assert response.json()["items"] == ["item1", "item2"]
+
+
+async def test_authenticated_write_increments_cache_version(
+    cached_test_client: AsyncClient,
+    fake_redis_cache: RedisCache,
+) -> None:
+    initial_version = await fake_redis_cache.get_version()
+    assert initial_version == 0
+
+    # Write with Authorization header must still increment cache version
+    res_post = await cached_test_client.post(
+        "/items",
+        headers={"Authorization": "Bearer some-access-token"},
+    )
+    assert res_post.status_code == 200
+    assert res_post.headers["X-Cache"] == "BYPASS"
+    new_version = await fake_redis_cache.get_version()
+    assert new_version == initial_version + 1
+
+
+async def test_app_configured_public_paths_cache_hit() -> None:
+    import app.main as main_module
+    from app.core.config import Settings
+    from app.main import create_app
+
+    test_settings = Settings(
+        _env_file=None,
+        jwt_secret_key="a" * 32,
+        cache_public_paths=("/test-public",),
+    )
+    fake_cache = RedisCache("redis://localhost:6379/0", ttl_seconds=60)
+    fake_cache._client = FakeRedisClient()  # type: ignore[assignment]
+    fake_cache._available = True
+
+    orig_cache = main_module.cache
+    main_module.cache = fake_cache
+    try:
+        app_with_fake = create_app(test_settings)
+
+        @app_with_fake.get("/test-public")
+        async def public_route() -> dict[str, str]:
+            return {"message": "hello"}
+
+        trans = ASGITransport(app=app_with_fake)
+        async with AsyncClient(transport=trans, base_url="http://testserver") as cl:
+            r1 = await cl.get("/test-public")
+            assert r1.status_code == 200
+            assert r1.headers["X-Cache"] == "MISS"
+
+            r2 = await cl.get("/test-public")
+            assert r2.status_code == 200
+            assert r2.headers["X-Cache"] == "HIT"
+            assert r2.json() == {"message": "hello"}
+    finally:
+        main_module.cache = orig_cache

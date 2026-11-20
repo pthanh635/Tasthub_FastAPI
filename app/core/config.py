@@ -12,6 +12,7 @@ from app.core.constants import (
     DEFAULT_ACCESS_TOKEN_EXPIRE_MINUTES,
     DEFAULT_API_V1_PREFIX,
     DEFAULT_APP_VERSION,
+    DEFAULT_CACHE_PUBLIC_PATHS,
     DEFAULT_JWT_ALGORITHM,
     DEFAULT_REFRESH_TOKEN_EXPIRE_DAYS,
     ENV_FILE_NAME,
@@ -113,6 +114,10 @@ class Settings(BaseSettings):
         default=30,
         validation_alias="CACHE_TTL_SECONDS",
         ge=0,
+    )
+    cache_public_paths: tuple[str, ...] = Field(
+        default=DEFAULT_CACHE_PUBLIC_PATHS,
+        validation_alias="CACHE_PUBLIC_PATHS",
     )
     test_database_url: str | None = Field(
         default=None,
