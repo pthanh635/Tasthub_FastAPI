@@ -5,7 +5,7 @@ from app.core.exceptions import (
     AuthenticationError,
     PermissionDeniedError,
 )
-from app.core.messages import ErrorMessages
+from app.core.messages import EmailMessages, ErrorMessages
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -14,7 +14,8 @@ from app.core.security import (
     hash_token,
     verify_password,
 )
-from app.models.enums import UserRole
+from app.core.tasks import TaskQueue, log_audit_event, send_email_notification
+from app.models.enums import AuditAction, AuditResource, UserRole
 from app.models.user import User
 from app.repositories.refresh_token_repository import RefreshTokenRepository
 from app.repositories.user_repository import UserRepository
@@ -29,9 +30,11 @@ class AuthService:
         self,
         user_repository: UserRepository,
         refresh_token_repository: RefreshTokenRepository,
+        task_queue: TaskQueue | None = None,
     ) -> None:
         self._user_repo = user_repository
         self._refresh_token_repo = refresh_token_repository
+        self._task_queue = task_queue
 
     async def register(self, data: RegisterRequest) -> UserResponse:
         normalized_email = data.email.strip().lower()
@@ -45,6 +48,20 @@ class AuthService:
             }
         )
         await self._user_repo.commit()
+        if self._task_queue is not None:
+            self._task_queue.enqueue(
+                send_email_notification,
+                normalized_email,
+                EmailMessages.WELCOME_SUBJECT,
+                EmailMessages.WELCOME_BODY_TEMPLATE.format(full_name=user.full_name),
+                user_id=user.id,
+            )
+            self._task_queue.enqueue(
+                log_audit_event,
+                AuditAction.USER_REGISTERED,
+                user_id=user.id,
+                resource=AuditResource.USERS,
+            )
         return UserResponse.model_validate(user)
 
     async def login(self, email: str, password: str) -> TokenResponse:

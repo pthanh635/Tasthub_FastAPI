@@ -26,6 +26,7 @@ from app.core.constants import (
     REQUEST_PROCESS_TIME_HEADER,
     CacheStatus,
 )
+from app.core.logging import request_id_ctx_var
 
 REQUEST_ID_REGEX = re.compile(r"^[a-zA-Z0-9_-]+$")
 CACHE_MAX_BUFFER_BYTES = 1024 * 1024
@@ -53,12 +54,16 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         request_id = _sanitize_request_id(request.headers.get(REQUEST_ID_HEADER))
         request.state.request_id = request_id
+        token = request_id_ctx_var.set(request_id)
         started = time.perf_counter()
-        response = await call_next(request)
-        elapsed_ms = (time.perf_counter() - started) * 1000
-        response.headers[REQUEST_ID_HEADER] = request_id
-        response.headers[REQUEST_PROCESS_TIME_HEADER] = f"{elapsed_ms:.2f}"
-        return response
+        try:
+            response = await call_next(request)
+            elapsed_ms = (time.perf_counter() - started) * 1000
+            response.headers[REQUEST_ID_HEADER] = request_id
+            response.headers[REQUEST_PROCESS_TIME_HEADER] = f"{elapsed_ms:.2f}"
+            return response
+        finally:
+            request_id_ctx_var.reset(token)
 
 
 class RedisCacheMiddleware(BaseHTTPMiddleware):

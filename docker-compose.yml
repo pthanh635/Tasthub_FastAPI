@@ -1,0 +1,90 @@
+x-app-environment: &app-environment
+  APP_ENV: ${APP_ENV:-development}
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-taskhub}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required in environment or .env}
+  DOCS_ENABLED: "${DOCS_ENABLED:-true}"
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_JSON_FORMAT: "${LOG_JSON_FORMAT:-true}"
+  SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-owner@taskhub.dev}
+  SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: taskhub-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-taskhub}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-taskhub}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - taskhub-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: taskhub-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - taskhub-network
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: taskhub-migrate
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    environment:
+      <<: *app-environment
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - taskhub-network
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: taskhub-api
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *app-environment
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - taskhub-network
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  taskhub-network:
+    driver: bridge

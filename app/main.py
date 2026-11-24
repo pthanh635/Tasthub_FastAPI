@@ -1,3 +1,4 @@
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -10,6 +11,7 @@ from app.core.cache import RedisCache
 from app.core.config import Settings, settings
 from app.core.database import engine
 from app.core.exceptions import AppException
+from app.core.logging import setup_logging
 from app.core.middleware import RedisCacheMiddleware, RequestContextMiddleware
 from app.core.openapi import (
     GLOBAL_ERROR_RESPONSES,
@@ -19,22 +21,34 @@ from app.core.openapi import (
     OPENAPI_TAGS,
     SWAGGER_UI_PARAMETERS,
 )
+from app.core.tasks import TaskQueue
 from app.schemas.base import HealthCheckResponse
+
+logger = logging.getLogger(__name__)
 
 cache = RedisCache(settings.redis_url, ttl_seconds=settings.cache_ttl_seconds)
 
 
-@asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
-    await cache.connect()
-    _app.state.cache = cache
-    yield
-    await cache.close()
-    await engine.dispose()
-
-
 def create_app(app_settings: Settings = settings) -> FastAPI:
     """Create and configure the FastAPI application instance."""
+    task_queue = TaskQueue()
+
+    @asynccontextmanager
+    async def lifespan(app_instance: FastAPI) -> AsyncGenerator[None, None]:
+        setup_logging(
+            level=app_settings.log_level,
+            json_format=app_settings.log_json_format,
+        )
+        await cache.connect()
+        app_instance.state.cache = cache
+        app_instance.state.task_queue = task_queue
+        yield
+        await task_queue.wait_all(
+            timeout_seconds=app_settings.task_queue_shutdown_timeout_seconds,
+        )
+        await cache.close()
+        await engine.dispose()
+
     docs_url = "/docs" if app_settings.docs_enabled else None
     redoc_url = "/redoc" if app_settings.docs_enabled else None
     openapi_url = "/openapi.json" if app_settings.docs_enabled else None
@@ -53,6 +67,7 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
         responses=GLOBAL_ERROR_RESPONSES,
         lifespan=lifespan,
     )
+    application.state.task_queue = task_queue
 
     application.add_middleware(
         RedisCacheMiddleware,
@@ -85,8 +100,9 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
     @application.exception_handler(Exception)
     async def unhandled_exception_handler(
         request: Request,
-        _exc: Exception,
+        exc: Exception,
     ) -> JSONResponse:
+        logger.exception("Unhandled internal server error", exc_info=exc)
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={
@@ -117,4 +133,3 @@ def create_app(app_settings: Settings = settings) -> FastAPI:
 
 
 app = create_app(settings)
-

@@ -82,3 +82,13 @@ class ErrorMessages:
     CANNOT_ASSIGN_OWNER_ROLE = "Cannot assign OWNER role to a non-owner member"
     PROJECT_ARCHIVED = "Cannot create tasks in an archived project"
     ASSIGNEE_NOT_IN_WORKSPACE = "Assignee must be a member of the project's workspace"
+
+
+class EmailMessages:
+    """Centralized email notification subjects and body templates."""
+
+    WELCOME_SUBJECT = "Welcome to TaskHub!"
+    WELCOME_BODY_TEMPLATE = (
+        "Hello {full_name}, your account has been successfully created."
+    )
+
