@@ -1,3 +1,14 @@
+x-app-environment: &app-environment
+  APP_ENV: ${APP_ENV:-development}
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-taskhub}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?JWT_SECRET_KEY is required in environment or .env}
+  DOCS_ENABLED: "${DOCS_ENABLED:-true}"
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_JSON_FORMAT: "${LOG_JSON_FORMAT:-true}"
+  SEED_ADMIN_EMAIL: ${SEED_ADMIN_EMAIL:-owner@taskhub.dev}
+  SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-}
+
 services:
   db:
     image: postgres:16-alpine
@@ -35,6 +46,21 @@ services:
     networks:
       - taskhub-network
 
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: taskhub-migrate
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+    environment:
+      <<: *app-environment
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - taskhub-network
+
   app:
     build:
       context: .
@@ -43,18 +69,14 @@ services:
     ports:
       - "8000:8000"
     environment:
-      APP_ENV: development
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-taskhub}
-      REDIS_URL: redis://redis:6379/0
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-this-to-a-secure-random-secret-key-at-least-32-bytes}
-      DOCS_ENABLED: "true"
-      LOG_LEVEL: INFO
-      LOG_JSON_FORMAT: "true"
+      <<: *app-environment
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     restart: unless-stopped
     networks:
       - taskhub-network

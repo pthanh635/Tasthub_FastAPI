@@ -1,6 +1,8 @@
 from app.models.base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 from app.models.comment import Comment
 from app.models.enums import (
+    AuditAction,
+    AuditResource,
     ProjectStatus,
     TaskPriority,
     TaskStatus,
@@ -15,6 +17,8 @@ from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 
 __all__ = [
+    "AuditAction",
+    "AuditResource",
     "Base",
     "Comment",
     "Label",

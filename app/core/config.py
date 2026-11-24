@@ -14,7 +14,9 @@ from app.core.constants import (
     DEFAULT_APP_VERSION,
     DEFAULT_CACHE_PUBLIC_PATHS,
     DEFAULT_JWT_ALGORITHM,
+    DEFAULT_LOG_LEVEL,
     DEFAULT_REFRESH_TOKEN_EXPIRE_DAYS,
+    DEFAULT_TASK_QUEUE_SHUTDOWN_TIMEOUT_SECONDS,
     ENV_FILE_NAME,
     ENV_FILE_PREFIX,
     INSECURE_PLACEHOLDER_SECRETS,
@@ -24,6 +26,7 @@ from app.core.constants import (
     SUPPORTED_JWT_ALGORITHMS,
     SUPPORTED_REDIS_URL_PREFIXES,
     AppEnvironment,
+    LogLevel,
 )
 from app.core.messages import ErrorMessages
 
@@ -119,13 +122,18 @@ class Settings(BaseSettings):
         default=DEFAULT_CACHE_PUBLIC_PATHS,
         validation_alias="CACHE_PUBLIC_PATHS",
     )
-    log_level: str = Field(
-        default="INFO",
+    log_level: LogLevel = Field(
+        default=DEFAULT_LOG_LEVEL,
         validation_alias="LOG_LEVEL",
     )
     log_json_format: bool = Field(
         default=True,
         validation_alias="LOG_JSON_FORMAT",
+    )
+    task_queue_shutdown_timeout_seconds: float = Field(
+        default=DEFAULT_TASK_QUEUE_SHUTDOWN_TIMEOUT_SECONDS,
+        validation_alias="TASK_QUEUE_SHUTDOWN_TIMEOUT_SECONDS",
+        gt=0,
     )
     test_database_url: str | None = Field(
         default=None,
@@ -216,6 +224,13 @@ class Settings(BaseSettings):
             allowed = ", ".join(SUPPORTED_REDIS_URL_PREFIXES)
             raise ValueError(f"{ErrorMessages.REDIS_URL_UNSUPPORTED_SCHEME}: {allowed}")
         return cleaned
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def normalize_log_level(cls, value: object) -> object:
+        if isinstance(value, str):
+            return value.strip().upper()
+        return value
 
     @field_validator("jwt_algorithm")
     @classmethod

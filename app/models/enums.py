@@ -30,3 +30,11 @@ class TaskPriority(StrEnum):
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
     URGENT = "URGENT"
+
+
+class AuditAction(StrEnum):
+    USER_REGISTERED = "USER_REGISTERED"
+
+
+class AuditResource(StrEnum):
+    USERS = "users"

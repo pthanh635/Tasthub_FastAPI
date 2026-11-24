@@ -1,13 +1,14 @@
 from collections.abc import Callable
-from typing import Annotated
+from typing import Annotated, cast
 
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.constants import TokenType
 from app.core.exceptions import AuthenticationError, PermissionDeniedError
 from app.core.messages import ErrorMessages
 from app.core.security import decode_token
+from app.core.tasks import TaskQueue
 from app.models.enums import UserRole
 from app.models.user import User
 from app.repositories.project_repository import (
@@ -55,11 +56,19 @@ ProjectRepositoryDep = Annotated[
 TaskRepositoryDep = Annotated[TaskRepository, Depends(get_task_repository)]
 
 
+def get_task_queue(request: Request) -> TaskQueue:
+    return cast(TaskQueue, request.app.state.task_queue)
+
+
+TaskQueueDep = Annotated[TaskQueue, Depends(get_task_queue)]
+
+
 def get_auth_service(
     user_repo: UserRepositoryDep,
     refresh_token_repo: RefreshTokenRepositoryDep,
+    task_queue: TaskQueueDep,
 ) -> AuthService:
-    return AuthService(user_repo, refresh_token_repo)
+    return AuthService(user_repo, refresh_token_repo, task_queue)
 
 
 def get_user_service(

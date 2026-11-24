@@ -87,3 +87,19 @@ class CacheStatus(StrEnum):
     MISS = "MISS"
     BYPASS = "BYPASS"
 
+
+class LogLevel(StrEnum):
+    DEBUG = "DEBUG"
+    INFO = "INFO"
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    CRITICAL = "CRITICAL"
+
+
+# Logging & Background Task Queue Constants
+DEFAULT_LOG_LEVEL: LogLevel = LogLevel.INFO
+CONSOLE_LOG_FORMAT: str = "[%(asctime)s] [%(levelname)s] [%(name)s] - %(message)s"
+UVICORN_LOGGERS: tuple[str, ...] = ("uvicorn", "uvicorn.error", "uvicorn.access")
+DEFAULT_TASK_QUEUE_SHUTDOWN_TIMEOUT_SECONDS: float = 5.0
+
+

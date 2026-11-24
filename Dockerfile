@@ -1,5 +1,5 @@
 # ------------------------------------------------------------------------------
-# Build Stage: Install dependencies and compile wheels
+# Build Stage: Compile runtime dependency wheels only (excludes dev/test tools)
 # ------------------------------------------------------------------------------
 FROM python:3.11-slim AS builder
 
@@ -10,7 +10,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -20,7 +19,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 
 
 # ------------------------------------------------------------------------------
-# Production Stage: Minimal runtime image
+# Production Stage: Minimal non-root runtime image
 # ------------------------------------------------------------------------------
 FROM python:3.11-slim AS runner
 
@@ -34,16 +33,16 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN groupadd -g 1001 appgroup && \
     useradd -u 1001 -g appgroup -s /bin/bash -m appuser
 
-# Install runtime dependencies (e.g., curl for container health check)
+# Install minimal runtime OS dependencies (curl for container health check)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy pre-built wheels from builder
+# Install pre-built runtime wheels from builder stage
 COPY --from=builder /app/wheels /wheels
 RUN pip install --no-cache-dir /wheels/* && rm -rf /wheels
 
-# Copy application source code and migrations
+# Copy application source code and Alembic migrations
 COPY --chown=appuser:appgroup alembic.ini ./
 COPY --chown=appuser:appgroup alembic ./alembic
 COPY --chown=appuser:appgroup app ./app
@@ -52,7 +51,7 @@ USER appuser
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
