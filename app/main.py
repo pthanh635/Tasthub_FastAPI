@@ -1,17 +1,135 @@
-from fastapi import FastAPI
+import logging
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
-from app.api.v1.routers import tasks
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 
-app = FastAPI(
-    title="TaskHub API",
-    description="Day 1: FastAPI layered architecture with an in-memory Task CRUD",
-    version="0.1.0",
+from app.api.v1.routers import auth, projects, tasks, users, workspaces
+from app.core.cache import RedisCache
+from app.core.config import Settings, settings
+from app.core.database import engine
+from app.core.exceptions import AppException
+from app.core.logging import setup_logging
+from app.core.middleware import RedisCacheMiddleware, RequestContextMiddleware
+from app.core.openapi import (
+    GLOBAL_ERROR_RESPONSES,
+    OPENAPI_CONTACT,
+    OPENAPI_DESCRIPTION,
+    OPENAPI_LICENSE,
+    OPENAPI_TAGS,
+    SWAGGER_UI_PARAMETERS,
 )
+from app.core.tasks import TaskQueue
+from app.schemas.base import HealthCheckResponse
+
+logger = logging.getLogger(__name__)
+
+cache = RedisCache(settings.redis_url, ttl_seconds=settings.cache_ttl_seconds)
 
 
-@app.get("/health", tags=["Health"])
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def create_app(app_settings: Settings = settings) -> FastAPI:
+    """Create and configure the FastAPI application instance."""
+    task_queue = TaskQueue()
+
+    @asynccontextmanager
+    async def lifespan(app_instance: FastAPI) -> AsyncGenerator[None, None]:
+        setup_logging(
+            level=app_settings.log_level,
+            json_format=app_settings.log_json_format,
+        )
+        await cache.connect()
+        app_instance.state.cache = cache
+        app_instance.state.task_queue = task_queue
+        yield
+        await task_queue.wait_all(
+            timeout_seconds=app_settings.task_queue_shutdown_timeout_seconds,
+        )
+        await cache.close()
+        await engine.dispose()
+
+    docs_url = "/docs" if app_settings.docs_enabled else None
+    redoc_url = "/redoc" if app_settings.docs_enabled else None
+    openapi_url = "/openapi.json" if app_settings.docs_enabled else None
+
+    application = FastAPI(
+        title=app_settings.app_name,
+        description=OPENAPI_DESCRIPTION,
+        version=app_settings.app_version,
+        openapi_tags=OPENAPI_TAGS,
+        contact=OPENAPI_CONTACT,
+        license_info=OPENAPI_LICENSE,
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url,
+        swagger_ui_parameters=SWAGGER_UI_PARAMETERS,
+        responses=GLOBAL_ERROR_RESPONSES,
+        lifespan=lifespan,
+    )
+    application.state.task_queue = task_queue
+
+    application.add_middleware(
+        RedisCacheMiddleware,
+        cache=cache,
+        public_get_paths=frozenset(app_settings.cache_public_paths),
+    )
+    application.add_middleware(RequestContextMiddleware)
+
+    @application.exception_handler(AppException)
+    async def app_exception_handler(
+        _request: Request,
+        exc: AppException,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.message},
+            headers=exc.headers,
+        )
+
+    @application.exception_handler(IntegrityError)
+    async def integrity_error_handler(
+        _request: Request,
+        _exc: IntegrityError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={"detail": "Database integrity conflict occurred"},
+        )
+
+    @application.exception_handler(Exception)
+    async def unhandled_exception_handler(
+        request: Request,
+        exc: Exception,
+    ) -> JSONResponse:
+        logger.exception("Unhandled internal server error", exc_info=exc)
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={
+                "detail": "Internal server error",
+                "request_id": getattr(request.state, "request_id", None),
+            },
+        )
+
+    @application.get(
+        "/health",
+        tags=["Health"],
+        response_model=HealthCheckResponse,
+        summary="Service liveness check",
+        description="Verify that the TaskHub API process is up and responding to HTTP requests.",
+        response_description="Service health status indicator.",
+    )
+    async def health() -> HealthCheckResponse:
+        return HealthCheckResponse(status="ok")
+
+    prefix = app_settings.api_v1_prefix
+    application.include_router(auth.router, prefix=prefix)
+    application.include_router(users.router, prefix=prefix)
+    application.include_router(workspaces.router, prefix=prefix)
+    application.include_router(projects.router, prefix=prefix)
+    application.include_router(tasks.router, prefix=prefix)
+
+    return application
 
 
-app.include_router(tasks.router, prefix="/api/v1")
+app = create_app(settings)
