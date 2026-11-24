@@ -2,39 +2,56 @@ from collections.abc import AsyncGenerator
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
+from app.core.config import settings
 from app.core.database import get_db_session
+from app.core.security import create_access_token
 from app.core.seed import SeedContext, seed_initial_data
 from app.main import app
-from app.models import Base
-
-TEST_SQLITE_URL = "sqlite+aiosqlite:///:memory:"
+from app.models import Base, UserRole
 
 
-def _enable_sqlite_foreign_keys(dbapi_connection: object, _connection_record: object) -> None:
-    cursor_method = getattr(dbapi_connection, "cursor", None)
-    if callable(cursor_method):
-        cursor = cursor_method()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+def get_test_database_url() -> str:
+    """Resolve dedicated PostgreSQL test database URL and prevent touching dev/prod DB."""
+    dev_url = make_url(settings.database_url)
+    if settings.test_database_url:
+        test_url = make_url(settings.test_database_url)
+        if test_url.password == "changeme" and dev_url.password != "changeme":
+            test_url = test_url.set(
+                username=dev_url.username,
+                password=dev_url.password,
+                host=dev_url.host,
+                port=dev_url.port,
+            )
+    else:
+        test_url = dev_url.set(database=f"{dev_url.database}_test")
+
+    if test_url.database == dev_url.database:
+        raise RuntimeError(
+            "Refusing to run destructive tests on the development/production database."
+        )
+    return test_url.render_as_string(hide_password=False)
 
 
 @pytest.fixture
 async def db_engine() -> AsyncGenerator[AsyncEngine, None]:
-    """Create an isolated async test engine with foreign key constraints enforced."""
-    engine = create_async_engine(TEST_SQLITE_URL, future=True)
-    sync_engine: Engine = engine.sync_engine
-    event.listen(sync_engine, "connect", _enable_sqlite_foreign_keys)
+    """Create an isolated async PostgreSQL test engine for each test function."""
+    engine = create_async_engine(
+        get_test_database_url(),
+        poolclass=NullPool,
+        future=True,
+    )
 
     async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
     try:
@@ -73,6 +90,16 @@ async def seed_context(db_session: AsyncSession) -> SeedContext:
 
 
 @pytest.fixture
+def auth_headers(seed_context: SeedContext) -> dict[str, str]:
+    """Return Bearer Authorization headers for the seeded owner user."""
+    token = create_access_token(
+        subject=seed_context.user_id,
+        role=UserRole.ADMIN.value,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+@pytest.fixture
 async def async_client(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> AsyncGenerator[AsyncClient, None]:
@@ -90,4 +117,3 @@ async def async_client(
     async with AsyncClient(transport=transport, base_url="http://testserver") as client:
         yield client
     app.dependency_overrides.clear()
-

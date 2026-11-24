@@ -1,6 +1,6 @@
-# TaskHub API — Day 2: Database & Repository Pattern
+# TaskHub API — Day 3: Authentication, Security, Authorization & RBAC
 
-Hệ thống quản lý công việc (**Task Management API**) xây dựng bằng **FastAPI**, **SQLAlchemy 2.x Async ORM**, **PostgreSQL (`asyncpg`)**, **Alembic** và **Pydantic v2** theo kiến trúc **Layered Architecture + Repository Pattern + Dependency Injection**.
+Hệ thống quản lý công việc (**Task Management API**) xây dựng bằng **FastAPI**, **SQLAlchemy 2.x Async ORM**, **PostgreSQL (`asyncpg`)**, **Alembic**, **JWT (`PyJWT`)**, **Bcrypt** và **Pydantic v2** theo kiến trúc **Layered Architecture + Repository Pattern + Dependency Injection**.
 
 ---
 
@@ -11,7 +11,8 @@ Hệ thống quản lý công việc (**Task Management API**) xây dựng bằn
 - **Validation & Settings**: Pydantic v2, `pydantic-settings`
 - **ORM & Database**: SQLAlchemy 2.x (Async ORM), PostgreSQL (`asyncpg`)
 - **Database Migration**: Alembic (async template)
-- **Testing**: `pytest`, `pytest-asyncio`, `httpx`, `aiosqlite` (isolated async test database)
+- **Authentication & Security**: `bcrypt` (password hashing), `PyJWT` (`HS256` Access & Refresh Tokens, Token Rotation & Revocation)
+- **Testing**: `pytest`, `pytest-asyncio`, `httpx` (chạy trên database PostgreSQL test riêng biệt `taskhub_test`)
 - **Code Quality**: `ruff`, `mypy` (strict mode)
 
 ---
@@ -22,19 +23,27 @@ Hệ thống quản lý công việc (**Task Management API**) xây dựng bằn
 taskhub/
 ├── alembic/
 │   ├── versions/
-│   │   └── 0001_initial_schema.py
+│   │   ├── 0001_initial_schema.py
+│   │   ├── 0002_auth_and_rbac.py
+│   │   └── 0003_cascade_and_indexes.py
 │   ├── env.py
 │   ├── README
 │   └── script.py.mako
 ├── app/
 │   ├── api/
 │   │   └── v1/
-│   │       └── routers/
-│   │           └── tasks.py
+│   │       ├── routers/
+│   │       │   ├── auth.py
+│   │       │   ├── projects.py
+│   │       │   ├── tasks.py
+│   │       │   ├── users.py
+│   │       │   └── workspaces.py
+│   │       └── dependencies.py
 │   ├── core/
 │   │   ├── config.py
 │   │   ├── database.py
 │   │   ├── exceptions.py
+│   │   ├── security.py
 │   │   └── seed.py
 │   ├── models/
 │   │   ├── __init__.py
@@ -43,23 +52,37 @@ taskhub/
 │   │   ├── enums.py
 │   │   ├── label.py
 │   │   ├── project.py
+│   │   ├── refresh_token.py
 │   │   ├── task.py
 │   │   ├── user.py
 │   │   └── workspace.py
 │   ├── repositories/
 │   │   ├── __init__.py
 │   │   ├── base.py
-│   │   └── task_repository.py
+│   │   ├── project_repository.py
+│   │   ├── refresh_token_repository.py
+│   │   ├── task_repository.py
+│   │   ├── user_repository.py
+│   │   └── workspace_repository.py
 │   ├── schemas/
 │   │   ├── __init__.py
-│   │   └── task.py
+│   │   ├── auth.py
+│   │   ├── project.py
+│   │   ├── task.py
+│   │   ├── user.py
+│   │   └── workspace.py
 │   ├── services/
 │   │   ├── __init__.py
-│   │   └── task_service.py
+│   │   ├── auth_service.py
+│   │   ├── task_service.py
+│   │   ├── user_service.py
+│   │   └── workspace_service.py
 │   └── main.py
 ├── tests/
 │   ├── conftest.py
+│   ├── test_auth_and_users.py
 │   ├── test_database_and_models.py
+│   ├── test_rbac_and_ownership.py
 │   ├── test_repository_and_service.py
 │   └── test_tasks.py
 ├── .env.example
@@ -72,154 +95,82 @@ taskhub/
 
 ---
 
-## 3. Kiến trúc Layered Architecture & Database Schema
+## 3. Kiến trúc Authentication, RBAC & Resource Ownership
 
-### Luồng xử lý
+### 3.1. Authentication & Token Lifecycle
+- **Password Hashing**: Mật khẩu người dùng được băm bằng `bcrypt` (`hash_password()`, `verify_password()`), tuyệt đối không lưu hoặc trả về plaintext/hash trong API response (`UserResponse`).
+- **JWT Access & Refresh Tokens**:
+  - **Access Token**: Thời hạn ngắn (`ACCESS_TOKEN_EXPIRE_MINUTES=30`), chứa `sub` (`user.id`), `role` (`ADMIN|MEMBER`), `type="access"`, `jti`, `iat`, `exp`.
+  - **Refresh Token**: Thời hạn dài (`REFRESH_TOKEN_EXPIRE_DAYS=7`), chứa `sub`, `type="refresh"`, `jti`. Bản băm SHA-256 (`token_hash`) được lưu trong bảng `refresh_tokens`.
+  - **Token Rotation & Revocation**: Khi gọi `POST /api/v1/auth/refresh`, refresh token cũ bị thu hồi (`revoked_at`) và cặp token mới được cấp phát. Khi gọi `POST /api/v1/auth/logout` hoặc đổi mật khẩu (`POST /api/v1/users/me/change-password`), refresh token bị thu hồi ngay lập tức.
 
-```text
-Client → Router (FastAPI) → Service (Business Logic) → Repository (SQLAlchemy 2.x Async) → PostgreSQL
-```
-
-- **Router (`app/api/v1/routers/tasks.py`)**: Nhận và validate HTTP request, gọi `TaskService` qua `Depends`, chuyển đổi domain exception sang HTTP status code (`200`, `201`, `204`, `404`, `422`), hoàn toàn không chứa câu lệnh SQL.
-- **Service (`app/services/task_service.py`)**: Chứa business logic, kiểm tra điều kiện nghiệp vụ (`project_id`, `assignee_id`, `created_by_id`), hoàn toàn độc lập với FastAPI và SQLAlchemy.
-- **Repository (`app/repositories/base.py`, `app/repositories/task_repository.py`)**: `BaseRepository[ModelType]` cung cấp `get_by_id()`, `get_all()`, `create()`, `update()`, `delete()` với type hints đầy đủ. `TaskRepository` kế thừa `BaseRepository[Task]` và bổ sung các truy vấn chuyên biệt.
-- **Models (`app/models/`)**: Khai báo 8 bảng nền tảng bằng SQLAlchemy 2.x (`DeclarativeBase`, `Mapped`, `mapped_column`, `relationship`, timezone-aware `DateTime(timezone=True)`):
-  - `users`: Thông tin tài khoản (`id` UUID PK, `email` unique index, `hashed_password`, `full_name`, `is_active`, timestamps).
-  - `workspaces`: Không gian làm việc (`id` UUID PK, `name`, `description`, `owner_id` FK → `users.id` `ON DELETE RESTRICT`, timestamps).
-  - `workspace_members`: Thành viên workspace (`id` UUID PK, `workspace_id` FK, `user_id` FK, `role` enum `OWNER|ADMIN|EDITOR|VIEWER`, `joined_at`, `UniqueConstraint(workspace_id, user_id)`).
-  - `projects`: Dự án thuộc workspace (`id` UUID PK, `workspace_id` FK → `workspaces.id` `ON DELETE RESTRICT`, `name`, `description`, timestamps).
-  - `tasks`: Công việc thuộc dự án (`id` UUID PK, `project_id` FK → `projects.id` `ON DELETE RESTRICT`, `title`, `description`, `status` enum `TODO|IN_PROGRESS|REVIEW|DONE`, `priority` enum `LOW|MEDIUM|HIGH|URGENT`, `assignee_id` nullable FK → `users.id` `ON DELETE SET NULL`, `created_by_id` FK → `users.id` `ON DELETE RESTRICT`, `due_date`, timestamps).
-  - `labels`: Nhãn phân loại trong workspace (`id` UUID PK, `workspace_id` FK, `name`, `color`, `UniqueConstraint(workspace_id, name)`).
-  - `task_labels`: Bảng liên kết nhiều-nhiều giữa `tasks` và `labels` với khóa chính tổ hợp `(task_id, label_id)`.
-  - `comments`: Bình luận trên task (`id` UUID PK, `task_id` FK → `tasks.id`, `author_id` FK → `users.id`, `content`, timestamps).
+### 3.2. Authorization, RBAC & Resource Ownership
+- **Dependency `get_current_user`**: Xác thực Bearer JWT Access Token qua `HTTPBearer` (tích hợp nút `Authorize` trên Swagger UI), kiểm tra trạng thái `user.is_active`.
+- **Global RBAC (`UserRole`)**: `ADMIN` và `MEMBER` (hỗ trợ dependency `require_global_roles(...)`).
+- **Workspace RBAC (`WorkspaceRole`) & Resource Ownership**:
+  - `OWNER`: Toàn quyền trên Workspace (chỉ `OWNER` hoặc global `ADMIN` mới được sửa/xóa Workspace; không thể bị xóa khỏi Workspace).
+  - `ADMIN`: Quản lý thành viên (`POST / DELETE /workspaces/{id}/members`), quản lý Project và toàn bộ Task trong Workspace.
+  - `EDITOR`: Tạo/cập nhật Project và Task. **Resource Ownership**: Khi xóa Task (`DELETE /api/v1/tasks/{id}`), `EDITOR` chỉ được xóa Task do chính mình tạo (`task.created_by_id == current_user.id`); không được xóa Task của người khác.
+  - `VIEWER`: Chỉ có quyền xem (`GET`) thông tin Workspace, Project và Task; mọi thao tác ghi (`POST`, `PUT`, `PATCH`, `DELETE`) đều bị từ chối với `403 Forbidden`.
 
 ---
 
-## 4. Hướng dẫn cài đặt & Cấu hình PostgreSQL / `.env`
+## 4. API Endpoints (Day 3)
 
-### 4.1. Cài đặt dependencies
-
-```bash
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 4.2. Tạo database PostgreSQL
-
-Đảm bảo PostgreSQL 15+ đang chạy, sau đó tạo database cho môi trường development và test:
-
-```sql
-CREATE DATABASE taskhub;
-CREATE DATABASE taskhub_test;
-```
-
-### 4.3. Cấu hình `.env`
-
-Sao chép `.env.example` sang `.env` và cập nhật thông tin kết nối PostgreSQL:
-
-```bash
-copy .env.example .env
-```
-
-Nội dung `.env`:
-
-```env
-APP_NAME="TaskHub API"
-DEBUG=false
-DATABASE_URL=postgresql+asyncpg://postgres:your_password@localhost:5432/taskhub
-TEST_DATABASE_URL=postgresql+asyncpg://postgres:your_password@localhost:5432/taskhub_test
-```
-
----
-
-## 5. Hướng dẫn chạy Migrations (Alembic)
-
-- Kiểm tra lịch sử migration:
-  ```bash
-  alembic history -v
-  ```
-- Tạo migration mới khi thay đổi model trong `app/models/`:
-  ```bash
-  alembic revision --autogenerate -m "initial schema"
-  ```
-- Áp dụng toàn bộ migration lên database hiện tại:
-  ```bash
-  alembic upgrade head
-  ```
-- Rollback 1 bước migration:
-  ```bash
-  alembic downgrade -1
-  ```
-- Xuất SQL DDL để kiểm tra ở chế độ offline:
-  ```bash
-  alembic upgrade head --sql
-  ```
-
-### Seed dữ liệu khởi tạo cho Ngày 2 (trước khi có Auth ở Ngày 3)
-
-```bash
-python -m app.core.seed
-```
-
-Lệnh này tạo idempotent `User`, `Workspace`, `WorkspaceMember` và `Project` mặc định, đồng thời in ra `project_id` để sử dụng khi gọi API Task CRUD.
-
----
-
-## 6. Hướng dẫn khởi động API
-
-```bash
-uvicorn app.main:app --reload
-```
-
-- **Swagger UI**: `http://127.0.0.1:8000/docs`
-- **ReDoc**: `http://127.0.0.1:8000/redoc`
-- **Health Check**: `GET http://127.0.0.1:8000/health`
-
----
-
-## 7. API Endpoints (Day 2 Contract)
-
-| Method | Endpoint | Status Code | Mô tả |
+### Auth & Users
+| Method | Endpoint | Status | Mô tả |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/health` | `200 OK` | Kiểm tra trạng thái hoạt động của service |
-| `POST` | `/api/v1/tasks` | `201 Created` / `404` / `422` | Tạo mới task trong `project_id` (tự động gán `created_by_id` từ workspace owner được seed) |
-| `GET` | `/api/v1/tasks` | `200 OK` / `422` | Lấy danh sách task có phân trang (`offset`, `limit`) |
-| `GET` | `/api/v1/tasks/{task_id}` | `200 OK` / `404` / `422` | Lấy chi tiết một task theo `UUID` |
-| `PUT` | `/api/v1/tasks/{task_id}` | `200 OK` / `404` / `422` | Cập nhật toàn bộ các trường cho phép chỉnh sửa của task (`title`, `description`, `status`, `priority`, `assignee_id`, `due_date`) |
-| `DELETE` | `/api/v1/tasks/{task_id}` | `204 No Content` / `404` / `422` | Xóa task theo `UUID` |
+| `POST` | `/api/v1/auth/register` | `201` / `409` | Đăng ký tài khoản mới |
+| `POST` | `/api/v1/auth/login` | `200` / `401` | Đăng nhập nhận `access_token` & `refresh_token` |
+| `POST` | `/api/v1/auth/refresh` | `200` / `401` | Làm mới và xoay vòng (rotate) cặp JWT token |
+| `POST` | `/api/v1/auth/logout` | `204` / `401` | Thu hồi (revoke) refresh token hiện tại |
+| `GET` | `/api/v1/users/me` | `200` / `401` | Xem thông tin hồ sơ người dùng hiện tại |
+| `PATCH` | `/api/v1/users/me` | `200` / `401` | Cập nhật `full_name` của người dùng hiện tại |
+| `POST` | `/api/v1/users/me/change-password` | `204` / `400` | Đổi mật khẩu và thu hồi toàn bộ refresh token cũ |
 
-> **Giải thích thay đổi API Contract so với Ngày 1:**
-> - `id` của Task chuyển từ `int` sang `UUID`.
-> - `POST /api/v1/tasks` (`TaskCreate`) yêu cầu `project_id: UUID` và bổ sung `priority`, `assignee_id`, `due_date`. Trường `created_by_id` không nhận từ client payload để tránh giả mạo danh tính trước khi có JWT Auth ở Ngày 3.
-> - `PUT /api/v1/tasks/{task_id}` sử dụng `TaskUpdate` chỉ cho phép chỉnh sửa các trường nghiệp vụ (`title`, `description`, `status`, `priority`, `assignee_id`, `due_date`), bảo vệ tính bất biến của `id`, `project_id`, `created_by_id`.
-> - `TaskResponse` (`TaskRead`) trả về đầy đủ `id`, `project_id`, `title`, `description`, `status`, `priority`, `assignee_id`, `created_by_id`, `due_date`, `created_at`, `updated_at`.
+### Workspaces, Projects & Tasks (Yêu cầu Bearer Token)
+| Method | Endpoint | Quyền yêu cầu | Mô tả |
+| :--- | :--- | :--- | :--- |
+| `POST` | `/api/v1/workspaces` | Authenticated | Tạo workspace mới (người tạo thành `OWNER`) |
+| `GET` | `/api/v1/workspaces` | Authenticated | Danh sách workspace mà user là thành viên |
+| `GET` | `/api/v1/workspaces/{id}` | Member (`ALL`) | Chi tiết workspace |
+| `PATCH` | `/api/v1/workspaces/{id}` | `OWNER` only | Cập nhật thông tin workspace |
+| `DELETE` | `/api/v1/workspaces/{id}` | `OWNER` only | Xóa workspace |
+| `GET` | `/api/v1/workspaces/{id}/members` | Member (`ALL`) | Danh sách thành viên trong workspace |
+| `POST` | `/api/v1/workspaces/{id}/members` | `OWNER` / `ADMIN` | Mời thành viên hoặc cập nhật role |
+| `DELETE` | `/api/v1/workspaces/{id}/members/{user_id}` | `OWNER` / `ADMIN` | Xóa thành viên khỏi workspace |
+| `POST` | `/api/v1/workspaces/{id}/projects` | `OWNER` / `ADMIN` / `EDITOR` | Tạo project trong workspace |
+| `GET` | `/api/v1/workspaces/{id}/projects` | Member (`ALL`) | Danh sách project trong workspace |
+| `GET` | `/api/v1/projects/{id}` | Member (`ALL`) | Xem chi tiết project |
+| `PATCH` | `/api/v1/projects/{id}` | `OWNER` / `ADMIN` / `EDITOR` | Cập nhật hoặc Archive project (`status=ARCHIVED`) |
+| `GET` | `/api/v1/projects/{id}/tasks` | Member (`ALL`) | Danh sách task thuộc project |
+| `POST` | `/api/v1/projects/{id}/tasks` | `OWNER` / `ADMIN` / `EDITOR` | Tạo task trong project (`created_by_id = current_user.id`) |
+| `POST` | `/api/v1/tasks` | `OWNER` / `ADMIN` / `EDITOR` | Tạo task mới |
+| `GET` | `/api/v1/tasks` | Member (`ALL`) | Danh sách task trong các workspace mà user tham gia |
+| `GET` | `/api/v1/tasks/{id}` | Member (`ALL`) | Chi tiết task theo UUID |
+| `PUT` | `/api/v1/tasks/{id}` | `OWNER` / `ADMIN` / `EDITOR` | Cập nhật toàn bộ trường chỉnh sửa của task |
+| `PATCH` | `/api/v1/tasks/{id}` | `OWNER` / `ADMIN` / `EDITOR` | Cập nhật một phần (partial update) task |
+| `DELETE` | `/api/v1/tasks/{id}` | Task Creator (`EDITOR`) / `OWNER` / `ADMIN` | Xóa task (kiểm tra Resource Ownership) |
 
 ---
 
-## 8. Hướng dẫn chạy Tests, Ruff & Mypy
+## 5. Hướng dẫn chạy Migrations, Server & Tests
 
 ```bash
-# Chạy toàn bộ test suite (sử dụng test database cô lập)
+# 1. Kích hoạt môi trường ảo
+.\.venv\Scripts\activate
+
+# 2. Chạy toàn bộ Alembic migration lên head
+alembic upgrade head
+
+# 3. Seed dữ liệu mẫu (giá trị lấy từ SEED_ADMIN_EMAIL và SEED_ADMIN_PASSWORD)
+python -m app.core.seed
+
+# 4. Khởi động API server
+uvicorn app.main:app --reload
+
+# 5. Chạy kiểm thử và kiểm tra chất lượng code
 python -m pytest -v
-
-# Kiểm tra code style và lint với Ruff
 ruff check .
-
-# Kiểm tra static type hints với Mypy
 mypy .
 ```
-
----
-
-## 9. Trạng thái hoàn thành Ngày 2
-
-- [x] Cấu hình `DATABASE_URL` qua `pydantic-settings` và `.env.example`.
-- [x] Khởi tạo `create_async_engine`, `async_sessionmaker`, `AsyncSession` và `get_db_session()`.
-- [x] Thiết kế đầy đủ 8 ORM models (`users`, `workspaces`, `workspace_members`, `projects`, `tasks`, `labels`, `task_labels`, `comments`) với relaciones, constraints, indexes và timezone-aware timestamps.
-- [x] Triển khai `BaseRepository[ModelType]` và `TaskRepository`.
-- [x] Refactor Task CRUD (`Router → Service → Repository`) sang async database với UUID.
-- [x] Cấu hình Alembic async và tạo migration `0001_initial_schema` (verify offline PostgreSQL SQL DDL cho cả `upgrade` và `downgrade`).
-- [x] Viết đầy đủ unit/integration tests với `pytest` & `pytest-asyncio` (12/12 passed), `ruff check .` passed, `mypy .` passed.
-- [ ] Chạy `alembic upgrade head` trực tiếp trên PostgreSQL server thực tế: Cần cài đặt/khởi chạy dịch vụ PostgreSQL tại máy local (`localhost:5432`) trước khi thực thi lệnh online migration.
-

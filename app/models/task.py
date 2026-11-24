@@ -26,7 +26,7 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     project_id: Mapped[uuid.UUID] = mapped_column(
         Uuid(as_uuid=True),
-        ForeignKey("projects.id", ondelete="RESTRICT"),
+        ForeignKey("projects.id", ondelete="CASCADE"),
         index=True,
         nullable=False,
     )
@@ -66,35 +66,32 @@ class Task(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     project: Mapped[Project] = relationship(
         "Project",
         back_populates="tasks",
-        lazy="selectin",
     )
     assignee: Mapped[User | None] = relationship(
         "User",
         back_populates="assigned_tasks",
         foreign_keys=[assignee_id],
-        lazy="selectin",
     )
     created_by: Mapped[User] = relationship(
         "User",
         back_populates="created_tasks",
         foreign_keys=[created_by_id],
-        lazy="selectin",
     )
     task_labels: Mapped[list[TaskLabel]] = relationship(
         "TaskLabel",
         back_populates="task",
-        lazy="selectin",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
     labels: Mapped[list[Label]] = relationship(
         "Label",
         secondary="task_labels",
         back_populates="tasks",
         viewonly=True,
-        lazy="selectin",
     )
     comments: Mapped[list[Comment]] = relationship(
         "Comment",
         back_populates="task",
-        lazy="selectin",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
-
