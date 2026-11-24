@@ -11,6 +11,7 @@ Hệ thống quản lý công việc (**Task Management API**) xây dựng bằn
 - **Validation & Settings**: Pydantic v2, `pydantic-settings`
 - **ORM & Database**: SQLAlchemy 2.x (Async ORM), PostgreSQL (`asyncpg`)
 - **Database Migration**: Alembic (async template)
+- **Caching**: Redis async client with graceful fallback when Redis is unavailable
 - **Authentication & Security**: `bcrypt` (password hashing), `PyJWT` (`HS256` Access & Refresh Tokens, Token Rotation & Revocation)
 - **Testing**: `pytest`, `pytest-asyncio`, `httpx` (chạy trên database PostgreSQL test riêng biệt `taskhub_test`)
 - **Code Quality**: `ruff`, `mypy` (strict mode)
@@ -154,7 +155,30 @@ taskhub/
 
 ---
 
-## 5. Hướng dẫn chạy Migrations, Server & Tests
+## 5. Multi-Environment Configuration & API Documentation (Day 5)
+
+### 5.1. Multi-Environment `pydantic-settings` & Fail-Fast Validation
+- **Environment Modes (`APP_ENV`)**: Hỗ trợ `development`, `testing`, `staging`, `production` (mặc định: `development`).
+- **Layered `.env` Loading**: Tự động nạp file cấu hình theo thứ tự ưu tiên: `.env` -> `.env.<APP_ENV>` -> biến môi trường hệ điều hành.
+- **Fail-Fast Validation**:
+  - Kiểm tra định dạng `DATABASE_URL` (`postgresql+asyncpg://`), `REDIS_URL` (`redis://` / `rediss://`), `JWT_ALGORITHM` (`HS256`/`HS384`/`HS512`) và `JWT_SECRET_KEY` (tối thiểu 32 ký tự).
+  - Ngăn chặn `TEST_DATABASE_URL` trùng với `DATABASE_URL`.
+  - Chế độ `production` tự động từ chối khởi động nếu `DEBUG=true`, dùng `JWT_SECRET_KEY` mẫu, hoặc dùng mật khẩu DB mặc định `changeme`.
+
+### 5.2. OpenAPI Documentation (Swagger UI & ReDoc)
+- **Swagger UI**: `/docs` (hỗ trợ `persistAuthorization`, `displayRequestDuration`, `filter`).
+- **ReDoc**: `/redoc`.
+- **OpenAPI Schema**: `/openapi.json` (tích hợp `BearerAuth` security scheme, mô tả tags và tài liệu hóa đầy đủ các response lỗi `400`, `401`, `403`, `404`, `409`, `500` qua `ErrorResponse` & `InternalErrorResponse`).
+- Có thể bật/tắt tài liệu API qua biến môi trường `DOCS_ENABLED=true|false`.
+
+---
+
+## 6. Hướng dẫn chạy Migrations, Server & Tests
+
+
+Redis cache mặc định dùng `redis://localhost:6379/0`. Có thể cấu hình qua
+`REDIS_URL` và `CACHE_TTL_SECONDS`. Nếu Redis chưa chạy, API vẫn khởi động và
+các response sẽ được đánh dấu `X-Cache: BYPASS`.
 
 ```bash
 # 1. Kích hoạt môi trường ảo
